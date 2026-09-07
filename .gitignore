@@ -1,0 +1,31 @@
+# dependencies
+node_modules
+.pnpm-store
+
+# next
+.next
+out
+.vercel
+
+# env
+.env
+.env.local
+.env.*.local
+!.env.example
+
+# supabase
+supabase/.temp
+supabase/.branches
+
+# misc
+.DS_Store
+*.log
+.turbo
+dist
+coverage
+*.tsbuildinfo
+
+# IDE
+.idea
+.vscode/*
+!.vscode/extensions.json

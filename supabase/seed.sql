@@ -1,0 +1,1 @@
+-- Optional development seed. Keep empty until a local Supabase instance exists.
