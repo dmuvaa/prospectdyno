@@ -1,4 +1,5 @@
 import type { Candidate } from "@prospectdyno/shared";
+import { emailsFromUnknown } from "./emails";
 import { normalizeDomain, websiteFromDomain } from "./normalize";
 
 type ApifyItem = Record<string, unknown>;
@@ -136,13 +137,13 @@ export function buildSerpInput(input: { queries: string[]; locations: string[]; 
 }
 
 export function buildWebsiteCrawlerInput(urls: string[]) {
-  const startUrls = [...new Set(urls.map((url) => url.trim()).filter(Boolean))].slice(0, 50).map((url) => ({ url }));
+  const startUrls = [...new Set(urls.map((url) => url.trim()).filter(Boolean))].slice(0, 12).map((url) => ({ url }));
   return {
     startUrls,
     crawlerType: "playwright:adaptive",
-    maxCrawlDepth: 1,
-    maxCrawlPages: Math.min(Math.max(startUrls.length * 3, 6), 80),
-    maxRequestRetries: 1,
+    maxCrawlDepth: 0,
+    maxCrawlPages: Math.max(startUrls.length, 1),
+    maxRequestRetries: 0,
     includeUrlGlobs: [],
     excludeUrlGlobs: ["/**/*.pdf", "/**/login*", "/**/cart*", "/**/checkout*"],
   };
@@ -391,7 +392,7 @@ export async function crawlWebsitePages(urls: string[], signal?: AbortSignal): P
   const byKey = new Map<string, CrawledSite>();
   if (!token || !actorId || unique.length === 0) return byKey;
 
-  const items = await runActor(token, actorId, buildWebsiteCrawlerInput(unique), 240_000, signal);
+  const items = await runActor(token, actorId, buildWebsiteCrawlerInput(unique), 90_000, signal);
   for (const item of items) {
     const url = firstText(item.url, item.loadedUrl, item.canonicalUrl);
     if (!url) continue;
@@ -466,6 +467,8 @@ async function runActor(
       if (signal?.aborted) throw new Error("Stopped.");
       if (Date.now() > deadline) {
         abortRemote();
+        const partial = datasetId ? await readDatasetItems(token, datasetId).catch(() => []) : [];
+        if (partial.length > 0) return partial;
         throw new Error(`Apify run timed out for ${actorId}.`);
       }
       await sleep(2000);
@@ -482,21 +485,25 @@ async function runActor(
     signal?.removeEventListener("abort", abortRemote);
   }
 
-  if (status === "ABORTED") throw new Error("Stopped.");
+  if (status === "ABORTED" && signal?.aborted) throw new Error("Stopped.");
   if (status !== "SUCCEEDED") {
+    const partial = datasetId ? await readDatasetItems(token, datasetId).catch(() => []) : [];
+    if (partial.length > 0) return partial;
     throw new Error(`Apify run ${status.toLowerCase()} for ${actorId}.`);
   }
   if (!datasetId) return [];
+  return readDatasetItems(token, datasetId);
+}
 
+async function readDatasetItems(token: string, datasetId: string) {
   const itemsResponse = await fetch(
     `https://api.apify.com/v2/datasets/${datasetId}/items?token=${encodeURIComponent(token)}&clean=true`,
-    { signal },
   );
   if (!itemsResponse.ok) {
-    throw new Error(`Could not read Apify results for ${actorId}.`);
+    throw new Error("Could not read Apify results.");
   }
-
-  return (await itemsResponse.json()) as ApifyItem[];
+  const items = (await itemsResponse.json()) as unknown;
+  return Array.isArray(items) ? (items as ApifyItem[]) : [];
 }
 
 function serpItemsToCandidates(items: ApifyItem[]): Candidate[] {
@@ -526,7 +533,7 @@ export function candidateFromApifyItem(item: ApifyItem, source: Candidate["sourc
   if (!name) return null;
 
   const categories = stringList(item.categories);
-  const emails = stringList(item.emails);
+  const emails = emailsFromUnknown([item.emails, item.email, item.emailAddress]);
   const country = countryFromCode(firstText(item.country, item.addressCountry, item.countryCode));
 
   return {

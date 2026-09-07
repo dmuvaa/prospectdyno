@@ -4,6 +4,7 @@ import { FilterBar } from "@/components/filter-bar";
 import { InboxActions } from "@/components/inbox-actions";
 import { EmptyState, PageHeader } from "@/components/page-header";
 import { StatusBadge } from "@/components/status-badge";
+import { emailsFromCompanySources } from "@/lib/contact-emails";
 import { searchTerm } from "@/lib/format";
 import { requireWorkspace } from "@/lib/workspace";
 
@@ -30,15 +31,26 @@ export default async function OpportunitiesPage({
   const { data: opportunities } = await query;
 
   const companyIds = [...new Set((opportunities ?? []).map((row) => row.company_id))];
-  const { data: companies } = companyIds.length
-    ? await supabase.from("companies").select("id, name, domain, country").in("id", companyIds)
-    : { data: [] };
+  const [{ data: companies }, { data: contacts }] = await Promise.all([
+    companyIds.length
+      ? supabase.from("companies").select("id, name, domain, country, source_metadata").in("id", companyIds)
+      : Promise.resolve({ data: [] as Array<{ id: string; name: string; domain: string | null; country: string | null; source_metadata: unknown }> }),
+    companyIds.length
+      ? supabase.from("contacts").select("company_id, email").eq("workspace_id", workspace.id).in("company_id", companyIds)
+      : Promise.resolve({ data: [] as Array<{ company_id: string; email: string | null }> }),
+  ]);
   const byId = new Map((companies ?? []).map((row) => [row.id, row]));
+  const contactsByCompany = new Map<string, Array<{ email?: string | null }>>();
+  for (const contact of contacts ?? []) {
+    const current = contactsByCompany.get(contact.company_id) ?? [];
+    current.push(contact);
+    contactsByCompany.set(contact.company_id, current);
+  }
 
   const rows = (opportunities ?? []).filter((row) => {
     if (!term) return true;
     const company = byId.get(row.company_id);
-    const haystack = `${company?.name ?? ""} ${company?.domain ?? ""} ${row.recommended_angle ?? ""}`.toLowerCase();
+    const haystack = `${company?.name ?? ""} ${company?.domain ?? ""} ${row.recommended_angle ?? ""} ${emailsFromCompanySources(contactsByCompany.get(row.company_id), company?.source_metadata).join(" ")}`.toLowerCase();
     return haystack.includes(term.toLowerCase());
   });
 
@@ -80,6 +92,11 @@ export default async function OpportunitiesPage({
                     <p className="mt-1 text-sm text-muted-foreground">
                       {company?.domain} {company?.country ? `· ${company.country}` : ""}
                     </p>
+                    {emailsFromCompanySources(contactsByCompany.get(row.company_id), company?.source_metadata).map((email) => (
+                      <a key={email} href={`mailto:${email}`} className="mt-1 block text-sm text-teal-800 hover:underline">
+                        {email}
+                      </a>
+                    ))}
                     <p className="mt-2 text-sm">{row.recommended_angle}</p>
                     {why[0] ? <p className="mt-2 text-sm text-muted-foreground">{why[0]}</p> : null}
                     <div className="mt-4">

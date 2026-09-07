@@ -6,6 +6,7 @@ import { PageHeader } from "@/components/page-header";
 import { StatusSelect } from "@/components/status-select";
 import { Card, CardContent, CardDescription, CardHeader, CardTitle } from "@/components/ui/card";
 import { Score } from "@/components/status-badge";
+import { emailsFromCompanySources } from "@/lib/contact-emails";
 import { requireWorkspace } from "@/lib/workspace";
 import type { ProspectStatus, QualificationReport } from "@prospectdyno/shared";
 import Link from "next/link";
@@ -25,7 +26,7 @@ export default async function OpportunityDetailPage({
     .maybeSingle();
   if (!opportunity) notFound();
 
-  const [{ data: company }, { data: evidence }, { data: messages }] = await Promise.all([
+  const [{ data: company }, { data: evidence }, { data: messages }, { data: contacts }] = await Promise.all([
     supabase.from("companies").select("*").eq("id", opportunity.company_id).single(),
     supabase.from("evidence_records").select("*").eq("opportunity_id", id),
     supabase
@@ -33,8 +34,14 @@ export default async function OpportunityDetailPage({
       .select("*")
       .eq("opportunity_id", id)
       .order("created_at", { ascending: false }),
+    supabase
+      .from("contacts")
+      .select("email")
+      .eq("workspace_id", workspace.id)
+      .eq("company_id", opportunity.company_id),
   ]);
 
+  const emails = emailsFromCompanySources(contacts, company?.source_metadata);
   const report = opportunity.report as unknown as QualificationReport;
   const why = Array.isArray(opportunity.why) ? (opportunity.why as string[]) : [];
 
@@ -117,6 +124,19 @@ export default async function OpportunityDetailPage({
             <span className="text-muted-foreground">Talk to: </span>
             {opportunity.recommended_contact}
           </p>
+          {emails.length > 0 ? (
+            <div>
+              <span className="text-muted-foreground">Email: </span>
+              {emails.map((email, index) => (
+                <span key={email}>
+                  {index > 0 ? ", " : ""}
+                  <a href={`mailto:${email}`} className="text-teal-800 hover:underline">
+                    {email}
+                  </a>
+                </span>
+              ))}
+            </div>
+          ) : null}
         </CardContent>
       </Card>
 

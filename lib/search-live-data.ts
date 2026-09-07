@@ -1,3 +1,4 @@
+import { emailsFromCompanySources } from "@/lib/contact-emails";
 import type { SearchActivityStep } from "@/lib/search-activity";
 import { looseSupabase } from "@/lib/supabase-loose";
 import type { Database } from "@prospectdyno/supabase/types";
@@ -15,6 +16,7 @@ export type SearchCompanyRow = {
   angle: string | null;
   opportunityId: string | null;
   email?: string | null;
+  emails?: string[];
   phone?: string | null;
 };
 
@@ -62,7 +64,7 @@ export async function loadSearchLiveSnapshot(
     companyIds.length
       ? supabase
           .from("companies")
-          .select("id, name, domain, city, country, industry, status, created_at")
+          .select("id, name, domain, city, country, industry, status, created_at, source_metadata")
           .in("id", companyIds)
           .order("created_at", { ascending: false })
       : Promise.resolve({ data: [] as Array<{
@@ -74,6 +76,7 @@ export async function loadSearchLiveSnapshot(
           industry: string | null;
           status: string;
           created_at: string;
+          source_metadata: unknown;
         }> }),
     companyIds.length
       ? supabase
@@ -104,19 +107,19 @@ export async function loadSearchLiveSnapshot(
         .limit(80)
     : { data: [] };
 
-  const contactByCompany = new Map<string, { email: string | null; phone: string | null }>();
+  const contactsByCompany = new Map<string, Array<{ email?: string | null; phone?: string | null }>>();
   for (const contact of contacts ?? []) {
-    const current = contactByCompany.get(contact.company_id) ?? { email: null, phone: null };
-    contactByCompany.set(contact.company_id, {
-      email: current.email || contact.email,
-      phone: current.phone || contact.phone,
-    });
+    const current = contactsByCompany.get(contact.company_id) ?? [];
+    current.push(contact);
+    contactsByCompany.set(contact.company_id, current);
   }
 
   const opportunityByCompany = new Map((opportunities ?? []).map((row) => [row.company_id, row]));
   const companyRows = (companies ?? []).map((company) => {
     const opportunity = opportunityByCompany.get(company.id);
-    const contact = contactByCompany.get(company.id);
+    const companyContacts = contactsByCompany.get(company.id) ?? [];
+    const emails = emailsFromCompanySources(companyContacts, company.source_metadata);
+    const phone = companyContacts.find((contact) => contact.phone)?.phone ?? null;
     return {
       id: company.id,
       name: company.name,
@@ -128,8 +131,9 @@ export async function loadSearchLiveSnapshot(
       score: opportunity?.opportunity_score ?? null,
       angle: opportunity?.recommended_angle ?? null,
       opportunityId: opportunity?.id ?? null,
-      email: contact?.email ?? null,
-      phone: contact?.phone ?? null,
+      email: emails[0] ?? null,
+      emails,
+      phone,
     };
   });
 

@@ -46,7 +46,7 @@ export function SearchResultsList({
       .filter((company) => {
         if (status && company.status !== status) return false;
         if (!term) return true;
-        return [company.name, company.domain, company.city, company.country, company.industry, company.email]
+        return [company.name, company.domain, company.city, company.country, company.industry, ...(company.emails ?? [company.email])]
           .filter(Boolean)
           .some((value) => value!.toLowerCase().includes(term));
       })
@@ -67,8 +67,8 @@ export function SearchResultsList({
             : `${visible.length} of ${total} companies`}
           {" · "}
             {opportunityCount} scored
-            {companies.filter((company) => company.email).length
-              ? ` · ${companies.filter((company) => company.email).length} emails`
+            {companies.filter((company) => (company.emails ?? [company.email]).some(Boolean)).length
+              ? ` · ${companies.filter((company) => (company.emails ?? [company.email]).some(Boolean)).length} emails`
               : ""}
         </p>
         {companies.length > 0 ? (
@@ -111,10 +111,14 @@ export function SearchResultsList({
                     <p className="text-sm text-muted-foreground">
                       {[company.domain, location, company.industry].filter(Boolean).join(" · ")}
                     </p>
-                    {company.email ? (
-                      <a href={`mailto:${company.email}`} className="mt-1 block text-sm text-teal-800 hover:underline">
-                        {company.email}
-                      </a>
+                    {(company.emails ?? (company.email ? [company.email] : [])).length > 0 ? (
+                      <div className="mt-1 space-y-0.5">
+                        {(company.emails ?? [company.email!]).map((email) => (
+                          <a key={email} href={`mailto:${email}`} className="block text-sm text-teal-800 hover:underline">
+                            {email}
+                          </a>
+                        ))}
+                      </div>
                     ) : running && !company.score ? (
                       <p className="mt-1 text-xs text-muted-foreground">Looking up email…</p>
                     ) : null}

@@ -62,7 +62,7 @@ describe("candidateFromApifyItem", () => {
       countryCode: "KE",
       website: "https://www.lmrealtors.ke/",
       phone: "+254 736 096805",
-      emails: ["info@lmrealtors.ke"],
+      emails: ["info@lmrealtors.ke", { email: "sales@lmrealtors.ke" }],
       categories: ["Real estate agency"],
       categoryName: "Real estate agency",
       url: "https://www.google.com/maps/search/?api=1&query=LM%20Realtors&query_place_id=ChIJ5fWmS7wXLxgR-mDkw9jlTNc",
@@ -82,7 +82,7 @@ describe("candidateFromApifyItem", () => {
     });
     expect(candidate?.source_metadata).toMatchObject({
       placeId: "ChIJ5fWmS7wXLxgR-mDkw9jlTNc",
-      emails: ["info@lmrealtors.ke"],
+      emails: ["info@lmrealtors.ke", "sales@lmrealtors.ke"],
       totalScore: 4.7,
     });
     expect(JSON.stringify(candidate?.source_metadata)).not.toContain("googleusercontent");
@@ -132,7 +132,8 @@ describe("buildWebsiteCrawlerInput", () => {
       "https://other.com",
     ]);
     expect(input.startUrls).toEqual([{ url: "https://example.com" }, { url: "https://other.com" }]);
-    expect(input.maxCrawlPages).toBe(6);
+    expect(input.maxCrawlPages).toBe(2);
+    expect(input.maxCrawlDepth).toBe(0);
   });
 });
 

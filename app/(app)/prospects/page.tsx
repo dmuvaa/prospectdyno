@@ -4,6 +4,7 @@ import { EmptyState, PageHeader } from "@/components/page-header";
 import { ExportButton } from "@/components/export-button";
 import { FilterBar } from "@/components/filter-bar";
 import { StatusBadge } from "@/components/status-badge";
+import { emailsFromCompanySources } from "@/lib/contact-emails";
 import { searchTerm } from "@/lib/format";
 import { requireWorkspace } from "@/lib/workspace";
 
@@ -18,7 +19,7 @@ export default async function ProspectsPage({
 
   let companiesQuery = supabase
     .from("companies")
-    .select("id, name, domain, city, country, industry, status, employee_count")
+    .select("id, name, domain, city, country, industry, status, employee_count, source_metadata")
     .eq("workspace_id", workspace.id)
     .order("created_at", { ascending: false });
 
@@ -27,7 +28,7 @@ export default async function ProspectsPage({
   }
   if (term) companiesQuery = companiesQuery.or(`name.ilike.%${term}%,domain.ilike.%${term}%`);
 
-  const [{ data: companies }, { data: hunts }, { data: links }] = await Promise.all([
+  const [{ data: companies }, { data: hunts }, { data: links }, { data: contacts }] = await Promise.all([
     companiesQuery,
     supabase
       .from("searches")
@@ -38,7 +39,18 @@ export default async function ProspectsPage({
       .from("search_results")
       .select("search_id, company_id")
       .eq("workspace_id", workspace.id),
+    supabase
+      .from("contacts")
+      .select("company_id, email")
+      .eq("workspace_id", workspace.id),
   ]);
+
+  const contactsByCompany = new Map<string, Array<{ email?: string | null }>>();
+  for (const contact of contacts ?? []) {
+    const current = contactsByCompany.get(contact.company_id) ?? [];
+    current.push(contact);
+    contactsByCompany.set(contact.company_id, current);
+  }
 
   const companyById = new Map((companies ?? []).map((company) => [company.id, company]));
   const linkedIds = new Set((links ?? []).map((link) => link.company_id));
@@ -92,7 +104,7 @@ export default async function ProspectsPage({
                   Open hunt
                 </Link>
               </div>
-              <CompanyTable companies={group.companies} />
+              <CompanyTable companies={group.companies} contactsByCompany={contactsByCompany} />
             </section>
           ))}
           {ungrouped.length > 0 ? (
@@ -101,7 +113,7 @@ export default async function ProspectsPage({
                 <h2 className="font-medium">Not in a hunt</h2>
                 <p className="text-sm text-muted-foreground">{ungrouped.length} companies</p>
               </div>
-              <CompanyTable companies={ungrouped} />
+              <CompanyTable companies={ungrouped} contactsByCompany={contactsByCompany} />
             </section>
           ) : null}
         </div>
@@ -119,6 +131,7 @@ export default async function ProspectsPage({
 
 function CompanyTable({
   companies,
+  contactsByCompany,
 }: {
   companies: Array<{
     id: string;
@@ -128,7 +141,9 @@ function CompanyTable({
     country: string | null;
     industry: string | null;
     status: string;
+    source_metadata?: unknown;
   }>;
+  contactsByCompany: Map<string, Array<{ email?: string | null }>>;
 }) {
   return (
     <div className="overflow-x-auto rounded-xl border border-border bg-card">
@@ -136,6 +151,7 @@ function CompanyTable({
         <thead className="border-b border-border text-muted-foreground">
           <tr>
             <th className="px-4 py-3 font-medium">Company</th>
+            <th className="px-4 py-3 font-medium">Email</th>
             <th className="px-4 py-3 font-medium">Domain</th>
             <th className="px-4 py-3 font-medium">Location</th>
             <th className="px-4 py-3 font-medium">Industry</th>
@@ -143,12 +159,27 @@ function CompanyTable({
           </tr>
         </thead>
         <tbody>
-          {companies.map((company) => (
+          {companies.map((company) => {
+            const emails = emailsFromCompanySources(contactsByCompany.get(company.id), company.source_metadata);
+            return (
             <tr key={company.id} className="border-b border-border last:border-0">
               <td className="px-4 py-3">
                 <Link href={`/prospects/${company.id}`} className="font-medium hover:underline">
                   {company.name}
                 </Link>
+              </td>
+              <td className="px-4 py-3">
+                {emails.length > 0 ? (
+                  <div className="space-y-0.5">
+                    {emails.map((email) => (
+                      <a key={email} href={`mailto:${email}`} className="block text-teal-800 hover:underline">
+                        {email}
+                      </a>
+                    ))}
+                  </div>
+                ) : (
+                  <span className="text-muted-foreground">—</span>
+                )}
               </td>
               <td className="px-4 py-3 text-muted-foreground">{company.domain}</td>
               <td className="px-4 py-3 text-muted-foreground">
@@ -159,7 +190,8 @@ function CompanyTable({
                 <StatusBadge status={company.status} />
               </td>
             </tr>
-          ))}
+            );
+          })}
         </tbody>
       </table>
     </div>

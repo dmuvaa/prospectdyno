@@ -5,6 +5,7 @@ import { StatusSelect } from "@/components/status-select";
 import { Card, CardContent, CardDescription, CardHeader, CardTitle } from "@/components/ui/card";
 import { Score } from "@/components/status-badge";
 import { CompanyNotesForm } from "@/components/company-notes";
+import { emailsFromCompanySources } from "@/lib/contact-emails";
 import { requireWorkspace } from "@/lib/workspace";
 import type { ProspectStatus } from "@prospectdyno/shared";
 
@@ -40,6 +41,7 @@ export default async function ProspectDetailPage({
   ]);
 
   const audit = audits?.[0];
+  const storedEmails = emailsFromCompanySources(contacts, company.source_metadata);
 
   return (
     <div className="space-y-6">
@@ -101,8 +103,23 @@ export default async function ProspectDetailPage({
             <ul className="space-y-2 text-sm">
               {contacts.map((contact) => (
                 <li key={contact.id}>
-                  {contact.name ?? "Unknown"} {contact.title ? `· ${contact.title}` : ""}{" "}
-                  {contact.email ? `· ${contact.email}` : ""}
+                  {contact.name ?? "Contact"} {contact.title ? `· ${contact.title}` : ""}{" "}
+                  {contact.email ? (
+                    <a href={`mailto:${contact.email}`} className="text-teal-800 hover:underline">
+                      {contact.email}
+                    </a>
+                  ) : null}
+                  {contact.phone ? ` · ${contact.phone}` : ""}
+                </li>
+              ))}
+            </ul>
+          ) : storedEmails.length > 0 ? (
+            <ul className="space-y-2 text-sm">
+              {storedEmails.map((email) => (
+                <li key={email}>
+                  <a href={`mailto:${email}`} className="text-teal-800 hover:underline">
+                    {email}
+                  </a>
                 </li>
               ))}
             </ul>

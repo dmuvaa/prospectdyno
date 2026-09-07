@@ -3,6 +3,7 @@ import {
   analyzeWebsite,
   crawledSiteFor,
   crawlWebsitePages,
+  emailsFromUnknown,
   enrichApifyContacts,
   fetchApifyCandidates,
   fetchApifySerpCandidates,
@@ -11,7 +12,6 @@ import {
   opportunityScore,
   parseCsv,
   parseUrlList,
-  relatedPageUrls,
   websiteFromDomain,
 } from "@prospectdyno/engine";
 import { createAdminClient } from "@prospectdyno/supabase/admin";
@@ -220,15 +220,21 @@ export async function runSearch(
           return [];
         })
       : Promise.resolve([]);
-    const candidates = await withAgentStep(
-      admin,
-      workspaceId,
-      agentRunId,
-      "discovery",
-      provider,
-      { input },
-      () => loadCandidates(provider, input, abort.signal),
-    );
+    let candidates: Candidate[] = [];
+    try {
+      candidates = await withAgentStep(
+        admin,
+        workspaceId,
+        agentRunId,
+        "discovery",
+        provider,
+        { input },
+        () => loadCandidates(provider, input, abort.signal),
+      );
+    } catch (error) {
+      if (error instanceof SearchCancelledError) throw error;
+      console.warn("Primary discovery failed:", error instanceof Error ? error.message : error);
+    }
     await assertNotCancelled(admin, searchId, jobId, abort.signal);
 
     const limited = dedupeCandidates(candidates).slice(0, input.limit ?? SEARCH_LIMIT);
@@ -305,6 +311,9 @@ export async function runSearch(
         .slice(0, input.limit ?? SEARCH_LIMIT),
       "save_serp_companies",
     );
+    if (saved.length === 0) {
+      throw new Error("Apify returned no companies.");
+    }
 
     const contactEnrichment = provider === "apify"
       ? enrichApifyContacts(saved.map((row) => row.candidate), abort.signal)
@@ -360,6 +369,15 @@ export async function runSearch(
           () => analyzeWebsite(website, null, abort.signal, { skipCrawlFallback: true }),
         );
         analyses.set(companyId, analyzed);
+        if (analyzed.emails.length > 0) {
+          candidate.email ||= analyzed.emails[0];
+          const metadata = candidate.source_metadata ?? {};
+          candidate.source_metadata = {
+            ...metadata,
+            emails: emailsFromUnknown([metadata.emails, analyzed.emails]),
+          };
+          await saveCandidateContacts(admin, workspaceId, companyId, candidate);
+        }
       } catch (analyzeError) {
         if (analyzeError instanceof SearchCancelledError) throw analyzeError;
       }
@@ -370,43 +388,47 @@ export async function runSearch(
       return Boolean(website) && isThinWebsiteAnalysis(analyses.get(row.companyId) ?? null);
     });
     if (thinRows.length > 0) {
-      await withAgentStep(
-        admin,
-        workspaceId,
-        agentRunId,
-        "website_analysis",
-        "crawl_websites",
-        { count: thinRows.length, names: thinRows.map((row) => row.candidate.name) },
-        async () => {
-          const urls = [
-            ...thinRows.flatMap((row) => {
+      try {
+        await withAgentStep(
+          admin,
+          workspaceId,
+          agentRunId,
+          "website_analysis",
+          "crawl_websites",
+          { count: thinRows.length, names: thinRows.map((row) => row.candidate.name) },
+          async () => {
+            const urls = thinRows.flatMap((row) => {
               const website = row.candidate.website ?? websiteFromDomain(row.candidate.domain);
               return website ? [website] : [];
-            }),
-            ...thinRows.flatMap((row) => {
-              const website = row.candidate.website ?? websiteFromDomain(row.candidate.domain);
-              return website ? relatedPageUrls(website).slice(1) : [];
-            }),
-          ];
-          const crawled = await crawlWebsitePages(urls, abort.signal);
-          for (const row of thinRows) {
-            await assertNotCancelled(admin, searchId, jobId, abort.signal);
-            const website = row.candidate.website ?? websiteFromDomain(row.candidate.domain);
-            if (!website) continue;
-            const site = crawledSiteFor(crawled, website) ?? [...crawled.values()].find((item) => {
-              const domain = normalizeDomain(website);
-              return Boolean(domain && item.domain === domain);
             });
-            if (!site?.text) continue;
-            try {
-              analyses.set(row.companyId, await analyzeWebsite(website, site, abort.signal, { skipCrawlFallback: true }));
-            } catch (analyzeError) {
-              if (analyzeError instanceof SearchCancelledError) throw analyzeError;
+            const crawled = await crawlWebsitePages(urls, abort.signal).catch((error) => {
+              if (error instanceof SearchCancelledError) throw error;
+              if (error instanceof Error && /stopped/i.test(error.message)) throw new SearchCancelledError();
+              console.warn("Rendered crawl failed:", error instanceof Error ? error.message : error);
+              return new Map();
+            });
+            for (const row of thinRows) {
+              await assertNotCancelled(admin, searchId, jobId, abort.signal);
+              const website = row.candidate.website ?? websiteFromDomain(row.candidate.domain);
+              if (!website) continue;
+              const site = crawledSiteFor(crawled, website) ?? [...crawled.values()].find((item) => {
+                const domain = normalizeDomain(website);
+                return Boolean(domain && item.domain === domain);
+              });
+              if (!site?.text) continue;
+              try {
+                analyses.set(row.companyId, await analyzeWebsite(website, site, abort.signal, { skipCrawlFallback: true }));
+              } catch (analyzeError) {
+                if (analyzeError instanceof SearchCancelledError) throw analyzeError;
+              }
             }
-          }
-          return { crawled: crawled.size, recovered: thinRows.filter((row) => !isThinWebsiteAnalysis(analyses.get(row.companyId) ?? null)).length };
-        },
-      );
+            return { crawled: crawled.size, recovered: thinRows.filter((row) => !isThinWebsiteAnalysis(analyses.get(row.companyId) ?? null)).length };
+          },
+        );
+      } catch (error) {
+        if (error instanceof SearchCancelledError) throw error;
+        console.warn("Rendered crawl failed:", error instanceof Error ? error.message : error);
+      }
     }
 
     await mapPool(saved, SCORE_CONCURRENCY, async ({ candidate, companyId }) => {
@@ -664,11 +686,7 @@ function mergeSavedCandidate(target: Candidate, incoming: Candidate): Candidate 
 }
 
 function candidateEmails(candidate: Candidate) {
-  const metadata = candidate.source_metadata ?? {};
-  const extra = Array.isArray(metadata.emails)
-    ? metadata.emails.filter((value): value is string => typeof value === "string")
-    : [];
-  return [...new Set([candidate.email, ...extra].map((value) => value?.trim().toLowerCase()).filter((value): value is string => Boolean(value)))];
+  return emailsFromUnknown([candidate.email, candidate.source_metadata]);
 }
 
 async function upsertCompany(
