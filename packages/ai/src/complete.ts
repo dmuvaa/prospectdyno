@@ -13,7 +13,7 @@ export async function completeJson<T>(input: {
   temperature?: number;
 }): Promise<AiCompletionResult<T>> {
   const route = routeTask(input.task);
-  const client = createAiClient(route.provider);
+  const client = createAiClient();
   const started = Date.now();
 
   const completion = await client.chat.completions.create({
@@ -61,7 +61,7 @@ export async function completeJson<T>(input: {
       promptTokens,
       completionTokens,
       totalTokens: completion.usage?.total_tokens ?? promptTokens + completionTokens,
-      costUsd: estimateCostUsd(route.provider, route.model, promptTokens, completionTokens),
+      costUsd: estimateCostUsd(route.model, promptTokens, completionTokens),
     },
     durationMs: Date.now() - started,
   };

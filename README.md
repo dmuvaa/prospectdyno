@@ -31,7 +31,7 @@ npx supabase db push
 ```
 
 3. Add `http://localhost:3000/auth/callback` to Auth redirect URLs.
-4. Set `OPENAI_API_KEY` (or `OPENROUTER_API_KEY`). CSV and website-list searches work without Apify.
+4. Set `OPENAI_API_KEY`. CSV and website-list searches work without Apify. For Apify discovery, set `APIFY_API_TOKEN` and `APIFY_GOOGLE_MAPS_ACTOR_ID`.
 5. Optional: set `REDIS_URL` to enable BullMQ delivery. Without it, `pnpm worker` polls Supabase job state.
 6. Optional: set `WORKER_SECRET` before exposing `/api/jobs/process`.
 7. Run:

@@ -176,7 +176,8 @@ export function SearchForm({
 
       {provider === "apify" ? (
         <p className="text-sm text-muted-foreground">
-          Uses the generated queries against Apify. Set APIFY_API_TOKEN and APIFY_ACTOR_ID on the server.
+          Uses the generated queries against Apify Google Maps discovery. Set APIFY_API_TOKEN and
+          APIFY_GOOGLE_MAPS_ACTOR_ID on the server.
         </p>
       ) : null}
 

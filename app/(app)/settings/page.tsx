@@ -31,8 +31,10 @@ export default async function SettingsPage() {
       .order("created_at", { ascending: false }),
   ]);
 
-  const apifyReady = Boolean(process.env.APIFY_API_TOKEN && process.env.APIFY_ACTOR_ID);
-  const openaiReady = Boolean(process.env.OPENAI_API_KEY || process.env.OPENROUTER_API_KEY);
+  const apifyReady = Boolean(
+    process.env.APIFY_API_TOKEN && (process.env.APIFY_GOOGLE_MAPS_ACTOR_ID || process.env.APIFY_ACTOR_ID),
+  );
+  const openaiReady = Boolean(process.env.OPENAI_API_KEY);
 
   return (
     <div className="space-y-6">
@@ -72,7 +74,7 @@ export default async function SettingsPage() {
           <CardDescription>Configured via server environment variables. Keys never go to the browser.</CardDescription>
         </CardHeader>
         <CardContent className="space-y-2 text-sm">
-          <p>OpenAI / OpenRouter: {openaiReady ? "configured" : "missing"}</p>
+          <p>OpenAI: {openaiReady ? "configured" : "missing"}</p>
           <p>Apify: {apifyReady ? "configured" : "not configured — CSV and website lists still work"}</p>
           <p>Supabase: connected</p>
         </CardContent>

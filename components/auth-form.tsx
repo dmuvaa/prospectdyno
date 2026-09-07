@@ -9,6 +9,7 @@ import { Input } from "@/components/ui/input";
 import { Label } from "@/components/ui/label";
 
 type AuthMode = "login" | "register" | "forgot-password";
+const AUTH_TIMEOUT_MS = 20_000;
 
 export function AuthForm({ mode }: { mode: AuthMode }) {
   const router = useRouter();
@@ -28,44 +29,59 @@ export function AuthForm({ mode }: { mode: AuthMode }) {
     const form = new FormData(event.currentTarget);
     const email = String(form.get("email") ?? "");
     const password = String(form.get("password") ?? "");
-    const fullName = String(form.get("full_name") ?? "");
+    const firstName = String(form.get("first_name") ?? "").trim();
+    const lastName = String(form.get("last_name") ?? "").trim();
+    const fullName = [firstName, lastName].filter(Boolean).join(" ");
     const supabase = createBrowserSupabaseClient();
-    const redirectTo = `${window.location.origin}/auth/callback`;
 
     try {
       if (mode === "forgot-password") {
-        const { error: resetError } = await supabase.auth.resetPasswordForEmail(email, {
-          redirectTo,
-        });
+        const redirectTo = authRedirectUrl("/update-password");
+        const { error: resetError } = await withAuthTimeout(
+          supabase.auth.resetPasswordForEmail(email, { redirectTo }),
+        );
         if (resetError) throw resetError;
         setMessage("Check your email for a reset link.");
         return;
       }
 
       if (mode === "register") {
-        const { error: signUpError } = await supabase.auth.signUp({
-          email,
-          password,
-          options: {
-            data: { full_name: fullName },
-            emailRedirectTo: redirectTo,
-          },
-        });
-        if (signUpError) throw signUpError;
         const destination = prompt
           ? `/onboarding?q=${encodeURIComponent(prompt)}`
           : "/onboarding";
-        router.push(destination);
+        const redirectTo = authRedirectUrl(destination);
+        const { data, error: signUpError } = await withAuthTimeout(
+          supabase.auth.signUp({
+            email,
+            password,
+            options: {
+              data: {
+                first_name: firstName,
+                last_name: lastName,
+                full_name: fullName,
+              },
+              emailRedirectTo: redirectTo,
+            },
+          }),
+        );
+        if (signUpError) throw signUpError;
+        if (!data.session) {
+          setMessage("Check your email to confirm your account, then continue setup.");
+          return;
+        }
+        router.replace(destination);
         router.refresh();
         return;
       }
 
-      const { error: signInError } = await supabase.auth.signInWithPassword({
-        email,
-        password,
-      });
+      const { error: signInError } = await withAuthTimeout(
+        supabase.auth.signInWithPassword({
+          email,
+          password,
+        }),
+      );
       if (signInError) throw signInError;
-      router.push(next || "/dashboard");
+      router.replace(next || "/dashboard");
       router.refresh();
     } catch (caught) {
       setError(caught instanceof Error ? caught.message : "Something went wrong.");
@@ -74,12 +90,39 @@ export function AuthForm({ mode }: { mode: AuthMode }) {
     }
   }
 
+  function authRedirectUrl(destination: string) {
+    const url = new URL("/auth/callback", window.location.origin);
+    url.searchParams.set("next", destination);
+    return url.toString();
+  }
+
+  async function withAuthTimeout<T>(promise: PromiseLike<T>): Promise<T> {
+    let timeout: ReturnType<typeof setTimeout> | undefined;
+    const timeoutPromise = new Promise<never>((_, reject) => {
+      timeout = setTimeout(() => {
+        reject(new Error("Authentication is taking too long. Check your Supabase URL, redirect URLs, and Vercel environment variables."));
+      }, AUTH_TIMEOUT_MS);
+    });
+
+    try {
+      return await Promise.race([promise, timeoutPromise]);
+    } finally {
+      if (timeout) clearTimeout(timeout);
+    }
+  }
+
   return (
     <form onSubmit={onSubmit} className="space-y-4">
       {mode === "register" ? (
-        <div className="space-y-2">
-          <Label htmlFor="full_name">Name</Label>
-          <Input id="full_name" name="full_name" autoComplete="name" required />
+        <div className="grid gap-3 sm:grid-cols-2">
+          <div className="space-y-2">
+            <Label htmlFor="first_name">First name</Label>
+            <Input id="first_name" name="first_name" autoComplete="given-name" required />
+          </div>
+          <div className="space-y-2">
+            <Label htmlFor="last_name">Last name</Label>
+            <Input id="last_name" name="last_name" autoComplete="family-name" required />
+          </div>
         </div>
       ) : null}
 
@@ -114,7 +157,7 @@ export function AuthForm({ mode }: { mode: AuthMode }) {
 
       <Button type="submit" variant="ink" className="w-full" disabled={pending}>
         {pending
-          ? "Please wait…"
+          ? "Please wait..."
           : mode === "register"
             ? "Create account"
             : mode === "forgot-password"

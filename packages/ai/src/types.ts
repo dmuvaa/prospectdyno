@@ -9,7 +9,7 @@ export type AiTask =
 
 export type AiQuality = "low" | "medium" | "high";
 
-export type AiProviderName = "openai" | "openrouter";
+export type AiProviderName = "openai";
 
 export type ModelRoute = {
   provider: AiProviderName;
