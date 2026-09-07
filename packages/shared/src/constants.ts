@@ -19,6 +19,8 @@ export const PROSPECT_STATUSES = [
 ] as const;
 export type ProspectStatus = (typeof PROSPECT_STATUSES)[number];
 
+export const INBOX_PROSPECT_STATUSES = ["NEW", "RESEARCHING", "QUALIFIED"] as const satisfies readonly ProspectStatus[];
+
 export const JOB_STATUSES = ["pending", "running", "completed", "failed", "cancelled"] as const;
 export type JobStatus = (typeof JOB_STATUSES)[number];
 

@@ -7,7 +7,7 @@ export default function RegisterPage() {
   return (
     <AuthShell
       title="Create your workspace"
-      description="Start by describing the customers you want. You can invite a team later."
+      description="Start by describing who you want to find. You can invite a team later."
       footer={
         <>
           Already have an account?{" "}

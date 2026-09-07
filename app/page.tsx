@@ -12,7 +12,7 @@ export default async function HomePage({
 }) {
   const { user } = await getUser();
   const params = await searchParams;
-  const destination = user ? "/icps/new" : "/register";
+  const destination = user ? "/dashboard" : "/register";
 
   return (
     <div className="min-h-full">
@@ -64,11 +64,13 @@ export default async function HomePage({
           />
           <div className="mt-4 flex flex-wrap items-center gap-3">
             <Button type="submit" variant="ink" size="lg">
-              {user ? "Interpret this ICP" : "Start with this description"}
+              {user ? "Find companies" : "Start with this description"}
               <ArrowRight />
             </Button>
             <p className="text-sm text-muted-foreground">
-              You will review the interpretation before any search runs.
+              {user
+                ? "ProspectDyno will interpret the brief and start the hunt."
+                : "Create an account, then we run the hunt from this description."}
             </p>
           </div>
         </form>

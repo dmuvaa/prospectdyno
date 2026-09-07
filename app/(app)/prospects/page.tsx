@@ -31,8 +31,8 @@ export default async function ProspectsPage({
   return (
     <div className="space-y-6">
       <PageHeader
-        title="Prospects"
-        description="Canonical companies after normalization and deduplication."
+        title="Companies"
+        description="Every company found so far, after normalization and deduplication."
         action={<ExportButton />}
       />
       <FilterBar
@@ -75,10 +75,10 @@ export default async function ProspectsPage({
         </div>
       ) : (
         <EmptyState
-          title={term || status ? "No matching prospects" : "No prospects yet"}
-          description={term || status ? "Try another filter." : "Import domains or a CSV to build the company table."}
-          href={term || status ? "/prospects" : "/searches/new"}
-          cta={term || status ? "Clear filters" : "Run a search"}
+          title={term || status ? "No matching companies" : "No companies yet"}
+          description={term || status ? "Try another filter." : "Start a hunt. Qualified companies land in the inbox first."}
+          href={term || status ? "/prospects" : "/dashboard"}
+          cta={term || status ? "Clear filters" : "Find companies"}
         />
       )}
     </div>

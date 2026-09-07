@@ -12,10 +12,10 @@ export default async function OnboardingPage({
   const { q } = await searchParams;
 
   if (workspace) {
-    redirect(q ? `/icps/new?q=${encodeURIComponent(q)}` : "/dashboard");
+    redirect(q ? `/dashboard?q=${encodeURIComponent(q)}` : "/dashboard");
   }
 
-  const next = q ? `/icps/new?q=${encodeURIComponent(q)}` : "/dashboard";
+  const next = q ? `/dashboard?q=${encodeURIComponent(q)}` : "/dashboard";
 
   return (
     <div className="flex min-h-full items-center justify-center px-6 py-16">
@@ -23,7 +23,7 @@ export default async function OnboardingPage({
         <Logo />
         <h1 className="font-heading mt-8 text-3xl">Name your workspace</h1>
         <p className="mt-2 text-sm text-muted-foreground">
-          This is the home for your ICPs, searches, and opportunities.
+          This is the home for hunts, the inbox, and saved briefs.
         </p>
         <OnboardingForm next={next} />
       </div>

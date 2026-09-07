@@ -53,6 +53,7 @@ Rules:
 - Distinguish verified facts from inferences. Put uncertain claims at low confidence.
 - Every important claim needs evidence and a source (page type or URL if known).
 - If the website excerpt is thin, lower confidence rather than inventing services.
+- If source_metadata.reviews are present, use them as evidence for reputation and buying signals.
 - recommended_contact is a title, not a fabricated person.`,
     user: JSON.stringify(input).slice(0, 12000),
     schema: {

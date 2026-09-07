@@ -35,6 +35,8 @@ export async function updateOpportunityStatusAction(opportunityId: string, statu
   });
   revalidatePath("/opportunities");
   revalidatePath(`/opportunities/${opportunityId}`);
+  revalidatePath("/dashboard");
+  revalidatePath("/prospects");
   return { ok: true };
 }
 

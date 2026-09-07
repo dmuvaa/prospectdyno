@@ -1,3 +1,5 @@
+import { resolvedOpenAiModel } from "@prospectdyno/ai";
+import { apifyScraperStatus } from "@prospectdyno/engine";
 import { requireWorkspace } from "@/lib/workspace";
 import { addSuppressionAction, removeSuppressionAction } from "@/lib/actions/settings";
 import { ApiKeyManager } from "@/components/api-key-manager";
@@ -54,10 +56,9 @@ export default async function SettingsPage() {
     : { data: [] };
   const profileById = new Map((profiles ?? []).map((row) => [row.id, row]));
 
-  const apifyReady = Boolean(
-    process.env.APIFY_API_TOKEN && (process.env.APIFY_GOOGLE_MAPS_ACTOR_ID || process.env.APIFY_ACTOR_ID),
-  );
+  const scrapers = apifyScraperStatus();
   const openaiReady = Boolean(process.env.OPENAI_API_KEY);
+  const openaiModel = resolvedOpenAiModel();
   const canEdit = role === "owner" || role === "admin";
 
   return (
@@ -133,12 +134,21 @@ export default async function SettingsPage() {
           <CardDescription>Configured via server environment variables. Keys never go to the browser.</CardDescription>
         </CardHeader>
         <CardContent className="space-y-2 text-sm">
-          <IntegrationRow label="OpenAI" ok={openaiReady} detail={openaiReady ? "Ready for qualification and drafts" : "Set OPENAI_API_KEY"} />
           <IntegrationRow
-            label="Apify"
-            ok={apifyReady}
-            detail={apifyReady ? "Discovery actors configured" : "Not configured — CSV and website lists still work"}
+            label="OpenAI"
+            ok={openaiReady}
+            detail={openaiReady ? openaiModel : "Set OPENAI_API_KEY"}
           />
+          <IntegrationRow
+            label="Apify token"
+            ok={scrapers.token}
+            detail={scrapers.token ? "Ready" : "Set APIFY_API_TOKEN (apify_api_...)"}
+          />
+          <IntegrationRow label="Google Maps" ok={scrapers.maps} detail={scrapers.maps ? "Discovery" : "Set APIFY_GOOGLE_MAPS_ACTOR_ID"} />
+          <IntegrationRow label="Contacts" ok={scrapers.contacts} detail={scrapers.contacts ? "Email/phone enrichment" : "Set APIFY_CONTACT_ACTOR_ID"} />
+          <IntegrationRow label="Google Search" ok={scrapers.serp} detail={scrapers.serp ? "SERP discovery" : "Set APIFY_SERP_ACTOR_ID"} />
+          <IntegrationRow label="Website crawler" ok={scrapers.website} detail={scrapers.website ? "JS site crawl" : "Set APIFY_WEBSITE_CRAWLER_ACTOR_ID"} />
+          <IntegrationRow label="Reviews" ok={scrapers.reviews} detail={scrapers.reviews ? "Maps reviews" : "Set APIFY_REVIEWS_ACTOR_ID"} />
           <IntegrationRow label="Supabase" ok detail="Connected" />
         </CardContent>
       </Card>

@@ -36,6 +36,11 @@ export function activityLabel(step: SearchActivityStep) {
     return name ? `Added ${name}` : "Company saved";
   }
   if (step.step_type === "website_analysis") {
+    if (step.tool_name === "crawl_websites") {
+      if (step.status === "running") return "Crawling company websites…";
+      if (step.status === "failed") return step.error ?? "Website crawl failed";
+      return "Website crawl finished";
+    }
     if (step.status === "running") return website ? `Reading ${website}…` : "Analyzing website…";
     if (step.status === "failed") return website ? `Could not read ${website}` : "Website analysis failed";
     return website ? `Analyzed ${website}` : "Website analyzed";

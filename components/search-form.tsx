@@ -66,16 +66,14 @@ export function SearchForm({
     return (
       <Card>
         <CardHeader>
-          <CardTitle>Approve an ICP first</CardTitle>
+          <CardTitle>Approve a brief first</CardTitle>
           <CardDescription>
-            Searches are scored against a confirmed customer definition. Confirm an ICP, then come back here.
+            Advanced imports score against a saved brief. Start a hunt from Run to interpret and search in one step, or confirm a brief first.
           </CardDescription>
         </CardHeader>
         <CardContent>
           <Button asChild variant="ink">
-            <Link href={icps[0] ? `/icps/${icps[0].id}` : "/icps/new"}>
-              {icps[0] ? "Review ICP" : "Create an ICP"}
-            </Link>
+            <Link href="/dashboard">Start a hunt instead</Link>
           </Button>
         </CardContent>
       </Card>

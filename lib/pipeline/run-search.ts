@@ -1,6 +1,9 @@
 import { qualifyCompany } from "@prospectdyno/ai";
 import {
   analyzeWebsite,
+  apifyScraperStatus,
+  crawlWebsitePages,
+  crawledSiteFor,
   fetchApifyCandidates,
   normalizeDomain,
   opportunityScore,
@@ -156,6 +159,20 @@ export async function runSearch(
       () => loadCandidates(search.provider, input),
     );
     const limited = candidates.slice(0, input.limit ?? SEARCH_LIMIT);
+    const websiteUrls = limited
+      .map((candidate) => candidate.website ?? websiteFromDomain(candidate.domain))
+      .filter((url): url is string => Boolean(url));
+    const crawledSites = apifyScraperStatus().website && websiteUrls.length > 0
+      ? await withAgentStep(
+          admin,
+          workspaceId,
+          agentRunId,
+          "website_analysis",
+          "crawl_websites",
+          { urls: websiteUrls.length },
+          () => crawlWebsitePages(websiteUrls).catch(() => new Map()),
+        )
+      : new Map();
 
     let icpCriteria: IcpInterpretation | null = null;
     if (search.icp_id) {
@@ -217,7 +234,7 @@ export async function runSearch(
             "website_analysis",
             "analyze_website",
             { company_id: companyId, website },
-            () => analyzeWebsite(website),
+            () => analyzeWebsite(website, crawledSiteFor(crawledSites, website)),
           );
           const { data: websiteAudit } = await admin
             .from("website_audits")

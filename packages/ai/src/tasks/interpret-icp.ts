@@ -3,8 +3,7 @@ import {
   type IcpInterpretation,
 } from "@prospectdyno/shared";
 import { z } from "zod";
-import { createAiClient } from "../client";
-import { estimateCostUsd, routeTask } from "../router";
+import { completeJson } from "../complete";
 import { AiError, type AiCompletionResult } from "../types";
 
 const stringList = z.array(z.string());
@@ -152,60 +151,20 @@ export async function interpretIcp(
     throw new AiError("Describe the customer in a bit more detail.");
   }
 
-  const route = routeTask("interpret_icp");
-  const client = createAiClient();
-  const started = Date.now();
-
-  const completion = await client.chat.completions.create({
-    model: route.model,
-    temperature: 0.2,
-    messages: [
-      { role: "system", content: SYSTEM_PROMPT },
-      { role: "user", content: trimmed },
-    ],
-    response_format: {
-      type: "json_schema",
-      json_schema: {
-        name: "icp_interpretation",
-        strict: true,
-        schema: interpretationJsonSchema as unknown as Record<string, unknown>,
-      },
-    },
+  const result = await completeJson({
+    task: "interpret_icp",
+    schemaName: "icp_interpretation",
+    schema: interpretationJsonSchema as unknown as Record<string, unknown>,
+    parser: icpInterpretationSchema,
+    system: SYSTEM_PROMPT,
+    user: trimmed,
   });
 
-  const content = completion.choices[0]?.message.content;
-  if (!content) {
-    throw new AiError("The model returned an empty interpretation.");
-  }
-
-  let parsedJson: unknown;
-  try {
-    parsedJson = JSON.parse(content);
-  } catch {
-    throw new AiError("The model returned invalid JSON.");
-  }
-
-  const parsed = icpInterpretationSchema.safeParse(parsedJson);
-  if (!parsed.success) {
-    throw new AiError("The model returned an invalid interpretation.");
-  }
-
-  const promptTokens = completion.usage?.prompt_tokens ?? 0;
-  const completionTokens = completion.usage?.completion_tokens ?? 0;
-
   return {
+    ...result,
     data: {
       ...emptyInterpretation(),
-      ...parsed.data,
+      ...result.data,
     },
-    provider: route.provider,
-    model: route.model,
-    usage: {
-      promptTokens,
-      completionTokens,
-      totalTokens: completion.usage?.total_tokens ?? promptTokens + completionTokens,
-      costUsd: estimateCostUsd(route.model, promptTokens, completionTokens),
-    },
-    durationMs: Date.now() - started,
   };
 }

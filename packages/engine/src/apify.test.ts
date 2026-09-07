@@ -1,5 +1,12 @@
 import { afterEach, describe, expect, it } from "vitest";
-import { buildGoogleMapsInput, getGoogleMapsActorId } from "./apify";
+import {
+  apifyToken,
+  buildGoogleMapsInput,
+  buildSerpInput,
+  buildWebsiteCrawlerInput,
+  encodeActorId,
+  getGoogleMapsActorId,
+} from "./apify";
 
 describe("buildGoogleMapsInput", () => {
   it("builds the Google Maps actor payload with conservative per-search limits", () => {
@@ -22,6 +29,48 @@ describe("buildGoogleMapsInput", () => {
       location: "Kenya",
       limit: 100,
     }).maxCrawledPlacesPerSearch).toBe(20);
+  });
+});
+
+describe("buildSerpInput", () => {
+  it("appends the first location to queries that do not already include it", () => {
+    expect(buildSerpInput({
+      queries: ["local SEO agency"],
+      locations: ["Manchester"],
+      limit: 10,
+    })).toMatchObject({
+      queries: ["local SEO agency Manchester"],
+      maxPagesPerQuery: 1,
+    });
+  });
+});
+
+describe("buildWebsiteCrawlerInput", () => {
+  it("dedupes start URLs and caps crawl size", () => {
+    const input = buildWebsiteCrawlerInput([
+      "https://example.com",
+      "https://example.com",
+      "https://other.com",
+    ]);
+    expect(input.startUrls).toEqual([{ url: "https://example.com" }, { url: "https://other.com" }]);
+    expect(input.maxCrawlPages).toBe(4);
+  });
+});
+
+describe("encodeActorId", () => {
+  it("uses Apify tilde notation", () => {
+    expect(encodeActorId("apify/google-search-scraper")).toBe("apify~google-search-scraper");
+  });
+});
+
+describe("apifyToken", () => {
+  afterEach(() => {
+    delete process.env.APIFY_API_TOKEN;
+  });
+
+  it("extracts the apify_api_ token when a prefix was pasted", () => {
+    process.env.APIFY_API_TOKEN = "APIFY_TOKEN=apify_api_abc123";
+    expect(apifyToken()).toBe("apify_api_abc123");
   });
 });
 

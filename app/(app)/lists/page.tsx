@@ -49,7 +49,7 @@ export default async function ListsPage() {
           title="No lists"
           description="Save qualified companies into named lists before exporting."
           href="/prospects"
-          cta="Browse prospects"
+          cta="Browse companies"
         />
       )}
     </div>

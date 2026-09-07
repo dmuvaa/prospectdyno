@@ -12,10 +12,10 @@ export default async function NewIcpPage({
   return (
     <div className="mx-auto max-w-3xl space-y-6">
       <PageHeader
-        crumbs={[{ href: "/icps", label: "ICPs" }, { label: "New ICP" }]}
-        kicker="ICP Builder"
+        crumbs={[{ href: "/icps", label: "Briefs" }, { label: "New brief" }]}
+        kicker="Briefs"
         title="Who are you looking for?"
-        description="Write it the way you would brief a researcher. ProspectDyno will turn it into editable criteria for you to confirm."
+        description="Write it the way you would brief a researcher. Confirm the criteria, then hunt from Run — or start the hunt directly there."
       />
       <IcpPromptForm defaultPrompt={q ?? ""} examples={EXAMPLE_PROMPTS} />
     </div>

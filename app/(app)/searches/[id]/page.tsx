@@ -99,7 +99,7 @@ export default async function SearchDetailPage({
       <RefreshWhile active={running} intervalMs={1500} />
       <PageHeader
         crumbs={[
-          { href: "/searches", label: "Searches" },
+          { href: "/searches", label: "History" },
           { label: search.name },
         ]}
         kicker={search.provider}
@@ -111,7 +111,7 @@ export default async function SearchDetailPage({
             {canRetry ? <RetrySearchButton searchId={search.id} /> : null}
             {search.icp_id ? (
               <Button asChild variant="outline">
-                <Link href={`/icps/${search.icp_id}`}>Open ICP</Link>
+                <Link href={`/icps/${search.icp_id}`}>Open brief</Link>
               </Button>
             ) : null}
           </div>

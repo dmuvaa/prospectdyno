@@ -76,7 +76,7 @@ export function IcpEditor({
 
   return (
     <div className="space-y-6">
-      <Breadcrumbs items={[{ href: "/icps", label: "ICPs" }, { label: name || "ICP" }]} />
+      <Breadcrumbs items={[{ href: "/icps", label: "Briefs" }, { label: name || "Brief" }]} />
       <div className="flex flex-wrap items-start justify-between gap-4">
         <div>
           <p className="text-sm font-medium text-teal-800">Review interpretation</p>
@@ -326,7 +326,7 @@ export function IcpEditor({
         </Button>
         {status === "approved" ? (
           <Button asChild variant="outline">
-            <Link href={`/searches/new?icpId=${icpId}`}>Start a search</Link>
+            <Link href={`/dashboard?icpId=${icpId}`}>Start a hunt</Link>
           </Button>
         ) : null}
         <Button type="button" variant="outline" disabled={pending !== null} onClick={() => void save("pending_review")}>

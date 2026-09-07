@@ -5,14 +5,14 @@ import { usePathname } from "next/navigation";
 import { useState } from "react";
 import {
   Briefcase,
-  LayoutDashboard,
+  History,
+  Inbox,
   ListFilter,
   ListTodo,
   LogOut,
   Megaphone,
   Menu,
-  Radar,
-  Search,
+  Play,
   Settings,
   Sparkles,
   X,
@@ -27,16 +27,16 @@ const groups = [
   {
     label: "Work",
     items: [
-      { href: "/dashboard", label: "Dashboard", icon: LayoutDashboard },
-      { href: "/opportunities", label: "Opportunities", icon: Radar },
-      { href: "/prospects", label: "Prospects", icon: Briefcase },
-      { href: "/searches", label: "Searches", icon: Search },
+      { href: "/dashboard", label: "Run", icon: Play },
+      { href: "/opportunities", label: "Inbox", icon: Inbox },
+      { href: "/prospects", label: "Companies", icon: Briefcase },
+      { href: "/searches", label: "History", icon: History },
     ],
   },
   {
     label: "Setup",
     items: [
-      { href: "/icps", label: "ICPs", icon: ListFilter },
+      { href: "/icps", label: "Briefs", icon: ListFilter },
       { href: "/lists", label: "Lists", icon: ListTodo },
       { href: "/campaigns", label: "Campaigns", icon: Megaphone },
       { href: "/settings", label: "Settings", icon: Settings },
@@ -110,12 +110,12 @@ export function AppNav({
           </div>
 
           <Link
-            href="/searches/new"
+            href="/dashboard"
             onClick={() => setOpen(false)}
             className="mt-6 inline-flex items-center justify-center gap-2 rounded-md bg-teal-700 px-3 py-2 text-sm font-medium text-white hover:bg-teal-600"
           >
             <Sparkles className="size-4" />
-            New search
+            Find companies
           </Link>
 
           <nav className="mt-6 space-y-5">

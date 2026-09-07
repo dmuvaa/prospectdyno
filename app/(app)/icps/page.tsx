@@ -17,12 +17,17 @@ export default async function IcpsPage() {
   return (
     <div className="space-y-6">
       <PageHeader
-        title="Ideal customers"
-        description="Each ICP starts as a description, then becomes structured criteria you can edit."
+        title="Saved briefs"
+        description="Hunts save a brief automatically. Edit criteria here when you want a tighter definition."
         action={
-          <Button asChild variant="ink">
-            <Link href="/icps/new">New ICP</Link>
-          </Button>
+          <div className="flex flex-wrap gap-2">
+            <Button asChild variant="ink">
+              <Link href="/dashboard">Find companies</Link>
+            </Button>
+            <Button asChild variant="outline">
+              <Link href="/icps/new">New brief</Link>
+            </Button>
+          </div>
         }
       />
 
@@ -50,10 +55,10 @@ export default async function IcpsPage() {
         </ul>
       ) : (
         <EmptyState
-          title="No ICPs yet"
-          description="Describe who you sell to. ProspectDyno will turn it into editable criteria."
-          href="/icps/new"
-          cta="Describe your first customer"
+          title="No briefs yet"
+          description="Describe who you sell to on the Run page. ProspectDyno saves the interpreted brief with the hunt."
+          href="/dashboard"
+          cta="Find companies"
         />
       )}
     </div>

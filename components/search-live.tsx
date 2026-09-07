@@ -1,5 +1,6 @@
 import Link from "next/link";
 import { Radar } from "lucide-react";
+import { InboxActions } from "@/components/inbox-actions";
 import { StatusBadge } from "@/components/status-badge";
 import { Card, CardContent, CardDescription, CardHeader, CardTitle } from "@/components/ui/card";
 import { activityLabel, pipelineStages, type SearchActivityStep } from "@/lib/search-activity";
@@ -111,7 +112,7 @@ export function SearchLivePanel({
               {companies.map((company) => (
                 <li key={company.id} className="rounded-xl border border-border bg-card p-4 shadow-sm">
                   <div className="flex items-start justify-between gap-3">
-                    <div>
+                    <div className="min-w-0">
                       <Link href={`/prospects/${company.id}`} className="font-medium hover:underline">
                         {company.name}
                       </Link>
@@ -125,16 +126,13 @@ export function SearchLivePanel({
                         <p className="text-xs text-muted-foreground">{running ? "Working…" : "—"}</p>
                       )}
                       <StatusBadge status={company.status} />
-                      {company.opportunityId ? (
-                        <Link
-                          href={`/opportunities/${company.opportunityId}`}
-                          className="mt-1 block text-xs text-teal-800 hover:underline"
-                        >
-                          Open report
-                        </Link>
-                      ) : null}
                     </div>
                   </div>
+                  {company.opportunityId ? (
+                    <div className="mt-3">
+                      <InboxActions opportunityId={company.opportunityId} />
+                    </div>
+                  ) : null}
                 </li>
               ))}
             </ul>

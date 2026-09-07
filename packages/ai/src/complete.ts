@@ -1,6 +1,7 @@
+import type OpenAI from "openai";
 import { z } from "zod";
 import { createAiClient } from "./client";
-import { estimateCostUsd, routeTask } from "./router";
+import { estimateCostUsd, reasoningEffortForTask, routeTask, usesGpt5Sampling } from "./router";
 import { AiError, type AiCompletionResult, type AiTask } from "./types";
 
 export async function completeJson<T>(input: {
@@ -18,7 +19,6 @@ export async function completeJson<T>(input: {
 
   const completion = await client.chat.completions.create({
     model: route.model,
-    temperature: input.temperature ?? 0.2,
     messages: [
       { role: "system", content: input.system },
       { role: "user", content: input.user },
@@ -31,7 +31,10 @@ export async function completeJson<T>(input: {
         schema: input.schema as unknown as Record<string, unknown>,
       },
     },
-  });
+    ...(usesGpt5Sampling(route.model)
+      ? { reasoning_effort: reasoningEffortForTask(input.task) }
+      : { temperature: input.temperature ?? 0.2 }),
+  } as OpenAI.Chat.ChatCompletionCreateParamsNonStreaming);
 
   const content = completion.choices[0]?.message.content;
   if (!content) {

@@ -34,12 +34,17 @@ export default async function SearchesPage({
     <div className="space-y-6">
       <RefreshWhile active={polling} />
       <PageHeader
-        title="Searches"
-        description="Each search discovers companies, analyzes websites, and scores opportunities against an ICP."
+        title="History"
+        description="Every hunt that discovered, analyzed, and scored companies. Open one to watch it live."
         action={
-          <Button asChild variant="ink">
-            <Link href="/searches/new">New search</Link>
-          </Button>
+          <div className="flex flex-wrap gap-2">
+            <Button asChild variant="ink">
+              <Link href="/dashboard">Find companies</Link>
+            </Button>
+            <Button asChild variant="outline">
+              <Link href="/searches/new">CSV / advanced</Link>
+            </Button>
+          </div>
         }
       />
       <FilterBar
@@ -76,10 +81,10 @@ export default async function SearchesPage({
         </ul>
       ) : (
         <EmptyState
-          title="No searches yet"
-          description="Import a CSV or paste domains. ProspectDyno will analyze and qualify them."
-          href="/searches/new"
-          cta="Create a search"
+          title="No hunts yet"
+          description="Describe who you want on the Run page. Companies appear as the worker finds and scores them."
+          href="/dashboard"
+          cta="Find companies"
         />
       )}
     </div>

@@ -1,6 +1,7 @@
 import Link from "next/link";
-import { PROSPECT_STATUSES, type ProspectStatus } from "@prospectdyno/shared";
+import { INBOX_PROSPECT_STATUSES, PROSPECT_STATUSES, type ProspectStatus } from "@prospectdyno/shared";
 import { FilterBar } from "@/components/filter-bar";
+import { InboxActions } from "@/components/inbox-actions";
 import { EmptyState, PageHeader } from "@/components/page-header";
 import { StatusBadge } from "@/components/status-badge";
 import { searchTerm } from "@/lib/format";
@@ -20,7 +21,9 @@ export default async function OpportunitiesPage({
     .eq("workspace_id", workspace.id)
     .order("opportunity_score", { ascending: false });
 
-  if (status && PROSPECT_STATUSES.includes(status as ProspectStatus)) {
+  if (!status || status === "inbox") {
+    query = query.in("status", [...INBOX_PROSPECT_STATUSES]);
+  } else if (status !== "all" && PROSPECT_STATUSES.includes(status as ProspectStatus)) {
     query = query.eq("status", status as ProspectStatus);
   }
 
@@ -39,58 +42,83 @@ export default async function OpportunitiesPage({
     return haystack.includes(term.toLowerCase());
   });
 
+  const filtered = Boolean(term || (status && status !== "inbox"));
+
   return (
     <div className="space-y-6">
       <PageHeader
-        kicker="Feed"
-        title="Opportunities"
-        description="High-priority companies with a reason to engage — not a dump of raw leads."
+        kicker="Review"
+        title="Inbox"
+        description="Keep the companies worth working. Skip the rest. Drafts stay on the report — nothing is sent."
       />
       <FilterBar
         action="/opportunities"
         q={q}
         status={status}
+        defaultStatus="inbox"
+        includeAllOption={false}
         placeholder="Filter by company, domain, or angle"
-        statuses={PROSPECT_STATUSES.map((value) => ({ value, label: value.replaceAll("_", " ") }))}
+        statuses={[
+          { value: "inbox", label: "To review" },
+          { value: "all", label: "All" },
+          ...PROSPECT_STATUSES.map((value) => ({ value, label: value.replaceAll("_", " ") })),
+        ]}
       />
       {rows.length > 0 ? (
         <ul className="space-y-3">
           {rows.map((row) => {
             const company = byId.get(row.company_id);
             const why = Array.isArray(row.why) ? (row.why as string[]) : [];
+            const inInbox = (INBOX_PROSPECT_STATUSES as readonly string[]).includes(row.status);
             return (
-              <li key={row.id}>
-                <Link
-                  href={`/opportunities/${row.id}`}
-                  className="block rounded-xl border border-border bg-card p-5 shadow-sm hover:border-teal-700/30"
-                >
-                  <div className="flex items-start justify-between gap-4">
-                    <div>
-                      <h2 className="font-medium">{company?.name ?? "Company"}</h2>
-                      <p className="mt-1 text-sm text-muted-foreground">
-                        {company?.domain} {company?.country ? `· ${company.country}` : ""}
-                      </p>
-                      <p className="mt-2 text-sm">{row.recommended_angle}</p>
-                      {why[0] ? <p className="mt-2 text-sm text-muted-foreground">{why[0]}</p> : null}
-                    </div>
-                    <div className="text-right">
-                      <p className="font-heading text-4xl">{row.opportunity_score}</p>
-                      <StatusBadge status={row.status} />
+              <li key={row.id} className="rounded-xl border border-border bg-card p-5 shadow-sm">
+                <div className="flex flex-wrap items-start justify-between gap-4">
+                  <div className="min-w-0">
+                    <Link href={`/opportunities/${row.id}`} className="font-medium hover:underline">
+                      {company?.name ?? "Company"}
+                    </Link>
+                    <p className="mt-1 text-sm text-muted-foreground">
+                      {company?.domain} {company?.country ? `· ${company.country}` : ""}
+                    </p>
+                    <p className="mt-2 text-sm">{row.recommended_angle}</p>
+                    {why[0] ? <p className="mt-2 text-sm text-muted-foreground">{why[0]}</p> : null}
+                    <div className="mt-4">
+                      {inInbox ? (
+                        <InboxActions opportunityId={row.id} />
+                      ) : (
+                        <ButtonLink opportunityId={row.id} />
+                      )}
                     </div>
                   </div>
-                </Link>
+                  <div className="text-right">
+                    <p className="font-heading text-4xl">{row.opportunity_score}</p>
+                    <StatusBadge status={row.status} />
+                  </div>
+                </div>
               </li>
             );
           })}
         </ul>
       ) : (
         <EmptyState
-          title={term || status ? "No matching opportunities" : "No opportunities yet"}
-          description={term || status ? "Try another filter, or clear it to see the full feed." : "Qualify companies against an ICP to fill this feed."}
-          href={term || status ? "/opportunities" : "/searches/new"}
-          cta={term || status ? "Clear filters" : "Run a search"}
+          title={filtered ? "No matching companies" : "Inbox is clear"}
+          description={
+            filtered
+              ? "Try another filter, or clear it to see companies waiting for review."
+              : "Start a hunt. Scored companies land here for Keep or Skip."
+          }
+          href={filtered ? "/opportunities" : "/dashboard"}
+          cta={filtered ? "Clear filters" : "Find companies"}
         />
       )}
     </div>
+  );
+}
+
+function ButtonLink({ opportunityId }: { opportunityId: string }) {
+  return (
+    <Link href={`/opportunities/${opportunityId}`} className="text-sm text-teal-800 hover:underline">
+      Open report
+    </Link>
   );
 }

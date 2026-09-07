@@ -1,6 +1,7 @@
 import { notFound } from "next/navigation";
 import { CopyButton } from "@/components/copy-button";
 import { GenerateMessageButton } from "@/components/generate-message";
+import { InboxActions } from "@/components/inbox-actions";
 import { PageHeader } from "@/components/page-header";
 import { StatusSelect } from "@/components/status-select";
 import { Card, CardContent, CardDescription, CardHeader, CardTitle } from "@/components/ui/card";
@@ -41,18 +42,21 @@ export default async function OpportunityDetailPage({
     <div className="space-y-6">
       <PageHeader
         crumbs={[
-          { href: "/opportunities", label: "Opportunities" },
+          { href: "/opportunities", label: "Inbox" },
           { label: company?.name ?? "Opportunity" },
         ]}
         kicker="Opportunity report"
         title={company?.name ?? "Opportunity"}
         description={opportunity.recommended_angle ?? undefined}
         action={
-          <StatusSelect
-            id={opportunity.id}
-            value={opportunity.status as ProspectStatus}
-            target="opportunity"
-          />
+          <div className="flex flex-wrap items-center gap-2">
+            <InboxActions opportunityId={opportunity.id} showOpen={false} />
+            <StatusSelect
+              id={opportunity.id}
+              value={opportunity.status as ProspectStatus}
+              target="opportunity"
+            />
+          </div>
         }
       />
 

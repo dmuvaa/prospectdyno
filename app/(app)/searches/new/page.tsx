@@ -1,6 +1,7 @@
 import { SearchForm } from "@/components/search-form";
 import { PageHeader } from "@/components/page-header";
 import { requireWorkspace } from "@/lib/workspace";
+import Link from "next/link";
 
 export default async function NewSearchPage({
   searchParams,
@@ -19,11 +20,16 @@ export default async function NewSearchPage({
   return (
     <div className="mx-auto max-w-3xl space-y-6">
       <PageHeader
-        crumbs={[{ href: "/searches", label: "Searches" }, { label: "New search" }]}
-        kicker="Discovery"
-        title="Start a search"
-        description="Choose an approved ICP, then import companies or generate an Apify plan."
+        crumbs={[{ href: "/searches", label: "History" }, { label: "Advanced" }]}
+        kicker="Advanced"
+        title="CSV, Apify, or a named import"
+        description="Use this when you already have a file or want a custom discovery plan. For a normal hunt, describe who you want on Run."
       />
+      <p className="text-sm">
+        <Link href="/dashboard" className="text-teal-800 hover:underline">
+          Start a hunt from Run
+        </Link>
+      </p>
       <SearchForm icps={icps ?? []} defaultIcpId={icpId} />
     </div>
   );

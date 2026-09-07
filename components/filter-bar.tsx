@@ -8,12 +8,18 @@ export function FilterBar({
   status,
   statuses,
   placeholder,
+  allLabel = "All statuses",
+  includeAllOption = true,
+  defaultStatus = "",
 }: {
   action: string;
   q?: string;
   status?: string;
   statuses: Array<{ value: string; label: string }>;
   placeholder: string;
+  allLabel?: string;
+  includeAllOption?: boolean;
+  defaultStatus?: string;
 }) {
   const hasFilters = Boolean(q || status);
 
@@ -27,10 +33,10 @@ export function FilterBar({
       />
       <select
         name="status"
-        defaultValue={status ?? ""}
+        defaultValue={status ?? defaultStatus}
         className="h-9 rounded-md border border-input bg-background px-2 text-sm"
       >
-        <option value="">All statuses</option>
+        {includeAllOption ? <option value="">{allLabel}</option> : null}
         {statuses.map((item) => (
           <option key={item.value} value={item.value}>
             {item.label}
