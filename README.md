@@ -19,6 +19,8 @@ worker.ts            BullMQ worker with database-polling fallback
 
 ## Setup
 
+Requires Node.js 24 LTS.
+
 1. Create a Supabase project and copy `.env.example` to `.env.local`.
 2. Apply migrations:
 
