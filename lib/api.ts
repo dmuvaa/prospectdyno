@@ -1,6 +1,6 @@
 import { NextResponse } from "next/server";
 import { createServerSupabaseClient } from "@prospectdyno/supabase/server";
-import { createServiceRoleClient } from "@prospectdyno/supabase/admin";
+import { createAdminClient } from "@prospectdyno/supabase/admin";
 import { cookies } from "next/headers";
 import { hashApiKey } from "@/lib/api-keys";
 import { looseSupabase } from "@/lib/supabase-loose";
@@ -19,7 +19,7 @@ export async function requireApiWorkspace(request?: Request) {
   const bearer = header?.startsWith("Bearer ") ? header.slice("Bearer ".length).trim() : null;
 
   if (bearer?.startsWith("pd_")) {
-    const admin = createServiceRoleClient();
+    const admin = createAdminClient();
     const { data: apiKey, error } = await looseSupabase(admin)
       .from<ApiKeyAuthRow>("api_keys")
       .select("id, workspace_id, scopes, revoked_at, expires_at")

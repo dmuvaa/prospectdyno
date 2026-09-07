@@ -8,7 +8,7 @@ import {
   parseUrlList,
   websiteFromDomain,
 } from "@prospectdyno/engine";
-import { createServiceRoleClient } from "@prospectdyno/supabase/admin";
+import { createAdminClient } from "@prospectdyno/supabase/admin";
 import type { Database, Json } from "@prospectdyno/supabase/types";
 import {
   CREDIT_COSTS,
@@ -64,7 +64,7 @@ export async function processJob(
   jobId: string,
   options: { alreadyClaimed?: boolean; workerId?: string } = {},
 ) {
-  const admin = createServiceRoleClient();
+  const admin = createAdminClient();
   const workerId = options.workerId ?? `worker:${process.pid}`;
   const job = options.alreadyClaimed
     ? await getJob(admin, jobId)
@@ -189,6 +189,15 @@ export async function runSearch(
       );
 
       await maybeSaveContact(admin, workspaceId, companyId, candidate);
+
+      await admin
+        .from("searches")
+        .update({
+          result_count: index + 1,
+          opportunity_count: opportunities,
+          cost: totalCost,
+        })
+        .eq("id", searchId);
 
       totalCost += CREDIT_COSTS.company_discovery;
       await recordUsage(admin, workspaceId, "company_discovery", CREDIT_COSTS.company_discovery, {
@@ -322,6 +331,15 @@ export async function runSearch(
       } catch {
         await admin.from("companies").update({ status: "NEW" }).eq("id", companyId);
       }
+
+      await admin
+        .from("searches")
+        .update({
+          result_count: index + 1,
+          opportunity_count: opportunities,
+          cost: totalCost,
+        })
+        .eq("id", searchId);
     }
 
     const output = {
@@ -641,30 +659,43 @@ async function withAgentStep<T>(
   action: () => Promise<T>,
 ): Promise<T> {
   const started = Date.now();
+  const { data: step } = await looseSupabase(admin)
+    .from<{ id: string }>("agent_steps")
+    .insert({
+      workspace_id: workspaceId,
+      agent_run_id: agentRunId,
+      step_type: stepType,
+      tool_name: toolName,
+      input: summarizeStepOutput(input) as Json,
+      status: "running",
+    })
+    .select("id")
+    .single();
+
   try {
     const output = await action();
-    await looseSupabase(admin).from("agent_steps").insert({
-      workspace_id: workspaceId,
-      agent_run_id: agentRunId,
-      step_type: stepType,
-      tool_name: toolName,
-      input: input as Json,
-      output: summarizeStepOutput(output) as Json,
-      duration_ms: Date.now() - started,
-      status: "completed",
-    });
+    if (step?.id) {
+      await looseSupabase(admin)
+        .from("agent_steps")
+        .update({
+          output: summarizeStepOutput(output) as Json,
+          duration_ms: Date.now() - started,
+          status: "completed",
+        })
+        .eq("id", step.id);
+    }
     return output;
   } catch (caught) {
-    await looseSupabase(admin).from("agent_steps").insert({
-      workspace_id: workspaceId,
-      agent_run_id: agentRunId,
-      step_type: stepType,
-      tool_name: toolName,
-      input: input as Json,
-      duration_ms: Date.now() - started,
-      status: "failed",
-      error: caught instanceof Error ? caught.message : "Step failed.",
-    });
+    if (step?.id) {
+      await looseSupabase(admin)
+        .from("agent_steps")
+        .update({
+          duration_ms: Date.now() - started,
+          status: "failed",
+          error: caught instanceof Error ? caught.message : "Step failed.",
+        })
+        .eq("id", step.id);
+    }
     throw caught;
   }
 }

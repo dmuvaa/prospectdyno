@@ -1,6 +1,6 @@
 import { NextResponse } from "next/server";
 import { claimNextJob, processJob } from "@/lib/pipeline/run-search";
-import { createServiceRoleClient } from "@prospectdyno/supabase/admin";
+import { createAdminClient } from "@prospectdyno/supabase/admin";
 
 export async function POST(request: Request) {
   const secret = process.env.WORKER_SECRET;
@@ -19,7 +19,7 @@ export async function POST(request: Request) {
     return NextResponse.json({ ok: true, jobId: body.jobId });
   }
 
-  const admin = createServiceRoleClient();
+  const admin = createAdminClient();
   const processed: string[] = [];
   for (let index = 0; index < 5; index += 1) {
     const job = await claimNextJob(admin, "api-job-processor");

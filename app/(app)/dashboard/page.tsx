@@ -44,7 +44,7 @@ export default async function DashboardPage() {
       .limit(5),
     supabase
       .from("searches")
-      .select("id, name, status, result_count, updated_at")
+      .select("id, name, status, result_count, opportunity_count, updated_at")
       .eq("workspace_id", workspace.id)
       .in("status", ["queued", "running"])
       .order("updated_at", { ascending: false })
@@ -87,7 +87,7 @@ export default async function DashboardPage() {
 
   return (
     <div className="space-y-8">
-      <RefreshWhile active={polling} />
+      <RefreshWhile active={polling} intervalMs={1500} />
       <PageHeader
         kicker="Workspace"
         title={workspace.name}
@@ -146,15 +146,20 @@ export default async function DashboardPage() {
             <Card>
               <CardHeader>
                 <CardTitle>In progress</CardTitle>
-                <CardDescription>These searches refresh automatically while the worker runs.</CardDescription>
+                <CardDescription>Open a search to watch companies appear as they are found.</CardDescription>
               </CardHeader>
               <CardContent>
                 <ul className="divide-y divide-border">
                   {(activeSearches ?? []).map((search) => (
                     <li key={search.id} className="flex items-center justify-between gap-3 py-3">
-                      <Link href={`/searches/${search.id}`} className="font-medium hover:underline">
-                        {search.name}
-                      </Link>
+                      <div>
+                        <Link href={`/searches/${search.id}`} className="font-medium hover:underline">
+                          {search.name}
+                        </Link>
+                        <p className="text-sm text-muted-foreground">
+                          {search.result_count} companies · {search.opportunity_count} opportunities
+                        </p>
+                      </div>
                       <StatusBadge status={search.status} />
                     </li>
                   ))}

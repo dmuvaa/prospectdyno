@@ -1,12 +1,15 @@
 import { createClient } from "@supabase/supabase-js";
 import type { Database } from "./database.types";
-import { supabaseServiceRoleKey, supabaseUrl } from "./env";
+import { supabaseSecretKey, supabaseUrl } from "./env";
 
-export function createServiceRoleClient() {
-  return createClient<Database>(supabaseUrl(), supabaseServiceRoleKey(), {
+export function createAdminClient() {
+  return createClient<Database>(supabaseUrl(), supabaseSecretKey(), {
     auth: {
       autoRefreshToken: false,
       persistSession: false,
     },
   });
 }
+
+/** @deprecated Use createAdminClient. */
+export const createServiceRoleClient = createAdminClient;

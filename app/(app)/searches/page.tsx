@@ -59,6 +59,7 @@ export default async function SearchesPage({
                     <h2 className="font-medium hover:underline">{search.name}</h2>
                     <p className="mt-1 text-sm text-muted-foreground">
                       {search.provider} · {search.result_count} companies · {search.opportunity_count} opportunities · {formatRelative(search.created_at)}
+                      {search.status === "running" || search.status === "queued" ? " · live" : ""}
                     </p>
                     {search.error ? <p className="mt-2 text-sm text-destructive">{search.error}</p> : null}
                   </Link>

@@ -3,12 +3,18 @@
 import { useRouter } from "next/navigation";
 import { useEffect } from "react";
 
-export function RefreshWhile({ active }: { active: boolean }) {
+export function RefreshWhile({
+  active,
+  intervalMs = 3000,
+}: {
+  active: boolean;
+  intervalMs?: number;
+}) {
   const router = useRouter();
   useEffect(() => {
     if (!active) return;
-    const timer = setInterval(() => router.refresh(), 3000);
+    const timer = setInterval(() => router.refresh(), intervalMs);
     return () => clearInterval(timer);
-  }, [active, router]);
+  }, [active, intervalMs, router]);
   return null;
 }
