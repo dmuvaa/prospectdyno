@@ -39,7 +39,11 @@ export function AddToList({
         onClick={() =>
           startTransition(async () => {
             const result = await addToListAction(listId, companyId);
-            setMessage(result.error ?? "Saved to list");
+            if (result.error) {
+              setMessage(result.error);
+            } else {
+              setMessage("Saved to list");
+            }
           })
         }
       >

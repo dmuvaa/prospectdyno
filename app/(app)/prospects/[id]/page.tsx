@@ -44,6 +44,10 @@ export default async function ProspectDetailPage({
   return (
     <div className="space-y-6">
       <PageHeader
+        crumbs={[
+          { href: "/prospects", label: "Prospects" },
+          { label: company.name },
+        ]}
         kicker={company.industry ?? "Company"}
         title={company.name}
         description={company.website ?? company.domain ?? undefined}

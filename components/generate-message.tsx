@@ -4,6 +4,7 @@ import { generateMessageAction } from "@/lib/actions/opportunity";
 import { Button } from "@/components/ui/button";
 import { useRouter } from "next/navigation";
 import { useState } from "react";
+import { toast } from "sonner";
 
 export function GenerateMessageButton({ opportunityId }: { opportunityId: string }) {
   const router = useRouter();
@@ -21,6 +22,7 @@ export function GenerateMessageButton({ opportunityId }: { opportunityId: string
           setError(null);
           const result = await generateMessageAction(opportunityId);
           if (result.error) setError(result.error);
+          else toast.success("Draft generated. Nothing was sent.");
           router.refresh();
           setPending(false);
         }}

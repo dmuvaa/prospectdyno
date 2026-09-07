@@ -15,8 +15,31 @@ async function poll() {
   }
 }
 
+async function pollLoop() {
+  for (;;) {
+    await poll();
+    await new Promise((resolve) => setTimeout(resolve, 4000));
+  }
+}
+
+function assertWorkerEnv() {
+  const missing: string[] = [];
+  if (!process.env.NEXT_PUBLIC_SUPABASE_URL?.trim() && !process.env.SUPABASE_URL?.trim()) {
+    missing.push("NEXT_PUBLIC_SUPABASE_URL");
+  }
+  if (!process.env.SUPABASE_SERVICE_ROLE_KEY?.trim()) {
+    missing.push("SUPABASE_SERVICE_ROLE_KEY");
+  }
+  if (missing.length) {
+    throw new Error(
+      `Render worker is missing ${missing.join(", ")}. Add the same values as Vercel in the worker Environment tab.`,
+    );
+  }
+}
+
 async function main() {
   console.log("ProspectDyno worker started");
+  assertWorkerEnv();
 
   if (isRedisQueueConfigured()) {
     const worker = createBullWorker((jobId) => processJob(jobId));
@@ -25,14 +48,12 @@ async function main() {
     }
     worker.on("completed", (job) => console.log("completed", job.id));
     worker.on("failed", (job, error) => console.error("failed", job?.id, error));
-    return;
+    console.log("BullMQ worker listening. Also polling Supabase for Vercel-created jobs.");
+  } else {
+    console.log("REDIS_URL not usable here; polling Supabase for jobs.");
   }
 
-  console.log("REDIS_URL not set; falling back to Supabase polling.");
-  for (;;) {
-    await poll();
-    await new Promise((resolve) => setTimeout(resolve, 4000));
-  }
+  await pollLoop();
 }
 
 void main();

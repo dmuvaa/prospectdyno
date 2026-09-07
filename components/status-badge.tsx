@@ -3,10 +3,10 @@ import { Badge } from "@/components/ui/badge";
 export function StatusBadge({ status }: { status: string }) {
   const normalized = status.replaceAll("_", " ");
   const variant =
-    status === "QUALIFIED" || status === "approved" || status === "completed" || status === "CUSTOMER"
+    status === "QUALIFIED" || status === "approved" || status === "completed" || status === "CUSTOMER" || status === "ready"
       ? "success"
-      : status === "failed" || status === "NOT_INTERESTED" || status === "SUPPRESSED"
-        ? "outline"
+      : status === "failed" || status === "NOT_INTERESTED" || status === "SUPPRESSED" || status === "missing"
+        ? "danger"
         : status === "running" || status === "queued" || status === "pending_review" || status === "RESEARCHING"
           ? "warning"
           : "secondary";

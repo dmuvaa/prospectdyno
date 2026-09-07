@@ -153,19 +153,25 @@ export async function retrySearchAction(searchId: string) {
   const { supabase, workspace } = await requireWorkspace();
   const { data: search } = await supabase
     .from("searches")
-    .select("id")
+    .select("id, status")
     .eq("id", searchId)
     .eq("workspace_id", workspace.id)
     .single();
   if (!search) return { error: "Search not found." };
 
   await supabase.from("searches").update({ status: "queued", error: null }).eq("id", searchId);
-  await enqueueJob(supabase, {
-    workspaceId: workspace.id,
-    jobType: "run_search",
-    entityType: "search",
-    entityId: searchId,
-  });
+  try {
+    await enqueueJob(supabase, {
+      workspaceId: workspace.id,
+      jobType: "run_search",
+      entityType: "search",
+      entityId: searchId,
+    });
+  } catch (caught) {
+    return { error: caught instanceof Error ? caught.message : "Could not queue the search." };
+  }
+  revalidatePath("/dashboard");
+  revalidatePath("/searches");
   revalidatePath(`/searches/${searchId}`);
   return { ok: true };
 }

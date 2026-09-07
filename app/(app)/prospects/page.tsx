@@ -1,16 +1,32 @@
 import Link from "next/link";
+import { PROSPECT_STATUSES, type ProspectStatus } from "@prospectdyno/shared";
 import { EmptyState, PageHeader } from "@/components/page-header";
 import { ExportButton } from "@/components/export-button";
+import { FilterBar } from "@/components/filter-bar";
 import { StatusBadge } from "@/components/status-badge";
+import { searchTerm } from "@/lib/format";
 import { requireWorkspace } from "@/lib/workspace";
 
-export default async function ProspectsPage() {
+export default async function ProspectsPage({
+  searchParams,
+}: {
+  searchParams: Promise<{ q?: string; status?: string }>;
+}) {
+  const { q, status } = await searchParams;
+  const term = searchTerm(q);
   const { supabase, workspace } = await requireWorkspace();
-  const { data: companies } = await supabase
+  let query = supabase
     .from("companies")
     .select("id, name, domain, country, industry, status, employee_count")
     .eq("workspace_id", workspace.id)
     .order("created_at", { ascending: false });
+
+  if (status && PROSPECT_STATUSES.includes(status as ProspectStatus)) {
+    query = query.eq("status", status as ProspectStatus);
+  }
+  if (term) query = query.or(`name.ilike.%${term}%,domain.ilike.%${term}%`);
+
+  const { data: companies } = await query;
 
   return (
     <div className="space-y-6">
@@ -18,6 +34,13 @@ export default async function ProspectsPage() {
         title="Prospects"
         description="Canonical companies after normalization and deduplication."
         action={<ExportButton />}
+      />
+      <FilterBar
+        action="/prospects"
+        q={q}
+        status={status}
+        placeholder="Search name or domain"
+        statuses={PROSPECT_STATUSES.map((value) => ({ value, label: value.replaceAll("_", " ") }))}
       />
       {companies && companies.length > 0 ? (
         <div className="overflow-x-auto rounded-xl border border-border bg-card">
@@ -52,10 +75,10 @@ export default async function ProspectsPage() {
         </div>
       ) : (
         <EmptyState
-          title="No prospects yet"
-          description="Import domains or a CSV to build the company table."
-          href="/searches/new"
-          cta="Run a search"
+          title={term || status ? "No matching prospects" : "No prospects yet"}
+          description={term || status ? "Try another filter." : "Import domains or a CSV to build the company table."}
+          href={term || status ? "/prospects" : "/searches/new"}
+          cta={term || status ? "Clear filters" : "Run a search"}
         />
       )}
     </div>

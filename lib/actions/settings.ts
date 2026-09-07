@@ -32,10 +32,28 @@ export async function addSuppressionAction(formData: FormData): Promise<void> {
   revalidatePath("/settings");
 }
 
-export async function updateWorkspaceProfileAction(formData: FormData): Promise<void> {
-  const { supabase, workspace, role } = await requireWorkspace();
-  if (role !== "owner" && role !== "admin") return;
+export async function removeSuppressionAction(id: string): Promise<void> {
+  const { supabase, workspace } = await requireWorkspace();
   await supabase
+    .from("suppression_records")
+    .delete()
+    .eq("id", id)
+    .eq("workspace_id", workspace.id);
+  await recordAudit(supabase, {
+    workspaceId: workspace.id,
+    action: "suppression.removed",
+    entityType: "suppression_record",
+    entityId: id,
+  });
+  revalidatePath("/settings");
+}
+
+export async function updateWorkspaceProfileAction(formData: FormData) {
+  const { supabase, workspace, role } = await requireWorkspace();
+  if (role !== "owner" && role !== "admin") {
+    return { error: "Only owners and admins can update the workspace." };
+  }
+  const { error } = await supabase
     .from("workspaces")
     .update({
       name: String(formData.get("name") ?? workspace.name).trim() || workspace.name,
@@ -43,6 +61,7 @@ export async function updateWorkspaceProfileAction(formData: FormData): Promise<
       website: String(formData.get("website") ?? "").trim() || null,
     })
     .eq("id", workspace.id);
+  if (error) return { error: error.message };
   await recordAudit(supabase, {
     workspaceId: workspace.id,
     action: "workspace.updated",
@@ -50,4 +69,6 @@ export async function updateWorkspaceProfileAction(formData: FormData): Promise<
     entityId: workspace.id,
   });
   revalidatePath("/settings");
+  revalidatePath("/dashboard");
+  return { ok: true };
 }

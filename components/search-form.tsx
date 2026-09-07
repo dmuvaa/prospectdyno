@@ -1,6 +1,7 @@
 "use client";
 
 import { useMemo, useState } from "react";
+import Link from "next/link";
 import type { SearchPlan, SearchProvider } from "@prospectdyno/shared";
 import { createAndRunSearchAction, generateSearchPlanAction } from "@/lib/actions/search";
 import { Button } from "@/components/ui/button";
@@ -63,9 +64,21 @@ export function SearchForm({
 
   if (approved.length === 0) {
     return (
-      <p className="text-sm text-muted-foreground">
-        Approve an ICP first. Searches are scored against a confirmed customer definition.
-      </p>
+      <Card>
+        <CardHeader>
+          <CardTitle>Approve an ICP first</CardTitle>
+          <CardDescription>
+            Searches are scored against a confirmed customer definition. Confirm an ICP, then come back here.
+          </CardDescription>
+        </CardHeader>
+        <CardContent>
+          <Button asChild variant="ink">
+            <Link href={icps[0] ? `/icps/${icps[0].id}` : "/icps/new"}>
+              {icps[0] ? "Review ICP" : "Create an ICP"}
+            </Link>
+          </Button>
+        </CardContent>
+      </Card>
     );
   }
 

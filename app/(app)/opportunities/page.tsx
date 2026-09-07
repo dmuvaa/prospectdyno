@@ -1,21 +1,43 @@
 import Link from "next/link";
+import { PROSPECT_STATUSES, type ProspectStatus } from "@prospectdyno/shared";
+import { FilterBar } from "@/components/filter-bar";
 import { EmptyState, PageHeader } from "@/components/page-header";
 import { StatusBadge } from "@/components/status-badge";
+import { searchTerm } from "@/lib/format";
 import { requireWorkspace } from "@/lib/workspace";
 
-export default async function OpportunitiesPage() {
+export default async function OpportunitiesPage({
+  searchParams,
+}: {
+  searchParams: Promise<{ q?: string; status?: string }>;
+}) {
+  const { q, status } = await searchParams;
+  const term = searchTerm(q);
   const { supabase, workspace } = await requireWorkspace();
-  const { data: opportunities } = await supabase
+  let query = supabase
     .from("opportunities")
     .select("id, company_id, opportunity_score, fit_score, recommended_angle, recommended_service, why, status")
     .eq("workspace_id", workspace.id)
     .order("opportunity_score", { ascending: false });
+
+  if (status && PROSPECT_STATUSES.includes(status as ProspectStatus)) {
+    query = query.eq("status", status as ProspectStatus);
+  }
+
+  const { data: opportunities } = await query;
 
   const companyIds = [...new Set((opportunities ?? []).map((row) => row.company_id))];
   const { data: companies } = companyIds.length
     ? await supabase.from("companies").select("id, name, domain, country").in("id", companyIds)
     : { data: [] };
   const byId = new Map((companies ?? []).map((row) => [row.id, row]));
+
+  const rows = (opportunities ?? []).filter((row) => {
+    if (!term) return true;
+    const company = byId.get(row.company_id);
+    const haystack = `${company?.name ?? ""} ${company?.domain ?? ""} ${row.recommended_angle ?? ""}`.toLowerCase();
+    return haystack.includes(term.toLowerCase());
+  });
 
   return (
     <div className="space-y-6">
@@ -24,9 +46,16 @@ export default async function OpportunitiesPage() {
         title="Opportunities"
         description="High-priority companies with a reason to engage — not a dump of raw leads."
       />
-      {opportunities && opportunities.length > 0 ? (
+      <FilterBar
+        action="/opportunities"
+        q={q}
+        status={status}
+        placeholder="Filter by company, domain, or angle"
+        statuses={PROSPECT_STATUSES.map((value) => ({ value, label: value.replaceAll("_", " ") }))}
+      />
+      {rows.length > 0 ? (
         <ul className="space-y-3">
-          {opportunities.map((row) => {
+          {rows.map((row) => {
             const company = byId.get(row.company_id);
             const why = Array.isArray(row.why) ? (row.why as string[]) : [];
             return (
@@ -56,10 +85,10 @@ export default async function OpportunitiesPage() {
         </ul>
       ) : (
         <EmptyState
-          title="No opportunities yet"
-          description="Qualify companies against an ICP to fill this feed."
-          href="/searches/new"
-          cta="Run a search"
+          title={term || status ? "No matching opportunities" : "No opportunities yet"}
+          description={term || status ? "Try another filter, or clear it to see the full feed." : "Qualify companies against an ICP to fill this feed."}
+          href={term || status ? "/opportunities" : "/searches/new"}
+          cta={term || status ? "Clear filters" : "Run a search"}
         />
       )}
     </div>

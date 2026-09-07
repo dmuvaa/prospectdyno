@@ -40,6 +40,10 @@ export default async function OpportunityDetailPage({
   return (
     <div className="space-y-6">
       <PageHeader
+        crumbs={[
+          { href: "/opportunities", label: "Opportunities" },
+          { label: company?.name ?? "Opportunity" },
+        ]}
         kicker="Opportunity report"
         title={company?.name ?? "Opportunity"}
         description={opportunity.recommended_angle ?? undefined}

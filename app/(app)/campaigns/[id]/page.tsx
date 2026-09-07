@@ -52,6 +52,10 @@ export default async function CampaignDetailPage({
   return (
     <div className="space-y-6">
       <PageHeader
+        crumbs={[
+          { href: "/campaigns", label: "Campaigns" },
+          { label: campaign.name },
+        ]}
         kicker={campaign.channel}
         title={campaign.name}
         description={campaign.objective ?? undefined}

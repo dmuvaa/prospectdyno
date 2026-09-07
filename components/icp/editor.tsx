@@ -5,8 +5,10 @@ import type { ReactNode } from "react";
 import Link from "next/link";
 import { useRouter } from "next/navigation";
 import type { IcpInterpretation, IcpStatus } from "@prospectdyno/shared";
+import { toast } from "sonner";
 import { archiveIcpAction, saveIcpAction } from "@/lib/actions/icp";
 import { TagList } from "@/components/icp/tag-list";
+import { Breadcrumbs } from "@/components/breadcrumbs";
 import { Badge } from "@/components/ui/badge";
 import { Button } from "@/components/ui/button";
 import { Card, CardContent, CardDescription, CardHeader, CardTitle } from "@/components/ui/card";
@@ -59,6 +61,7 @@ export function IcpEditor({
       return;
     }
     setPending(null);
+    toast.success(nextStatus === "approved" ? "ICP confirmed" : "Draft saved");
     router.refresh();
   }
 
@@ -73,6 +76,7 @@ export function IcpEditor({
 
   return (
     <div className="space-y-6">
+      <Breadcrumbs items={[{ href: "/icps", label: "ICPs" }, { label: name || "ICP" }]} />
       <div className="flex flex-wrap items-start justify-between gap-4">
         <div>
           <p className="text-sm font-medium text-teal-800">Review interpretation</p>

@@ -33,7 +33,16 @@ export default async function ListDetailPage({
 
   return (
     <div className="space-y-6">
-      <PageHeader title={list.name} description={list.description ?? undefined} action={<ExportButton companyIds={companyIds} />} />
+      <PageHeader
+        crumbs={[
+          { href: "/lists", label: "Lists" },
+          { label: list.name },
+        ]}
+        title={list.name}
+        description={list.description ?? undefined}
+        action={<ExportButton companyIds={companyIds} />}
+      />
+      {(companies ?? []).length > 0 ? (
       <ul className="divide-y divide-border rounded-xl border border-border bg-card">
         {(companies ?? []).map((company) => (
           <li key={company.id} className="flex items-center justify-between gap-3 px-4 py-3">
@@ -54,6 +63,11 @@ export default async function ListDetailPage({
           </li>
         ))}
       </ul>
+      ) : (
+        <div className="rounded-xl border border-dashed border-border p-8 text-center text-sm text-muted-foreground">
+          No companies in this list yet. Open a prospect and use “Save to list”.
+        </div>
+      )}
     </div>
   );
 }

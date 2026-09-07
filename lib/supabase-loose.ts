@@ -9,6 +9,7 @@ export interface LooseQuery<T = unknown> extends PromiseLike<DbResponse<T>> {
   insert(values: unknown, options?: unknown): LooseQuery<T>;
   update(values: unknown): LooseQuery<T>;
   upsert(values: unknown, options?: unknown): LooseQuery<T>;
+  delete(): LooseQuery<T>;
   eq(column: string, value: unknown): LooseQuery<T>;
   in(column: string, values: unknown[]): LooseQuery<T>;
   order(column: string, options?: unknown): LooseQuery<T>;

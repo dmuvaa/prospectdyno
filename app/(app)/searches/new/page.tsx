@@ -19,6 +19,7 @@ export default async function NewSearchPage({
   return (
     <div className="mx-auto max-w-3xl space-y-6">
       <PageHeader
+        crumbs={[{ href: "/searches", label: "Searches" }, { label: "New search" }]}
         kicker="Discovery"
         title="Start a search"
         description="Choose an approved ICP, then import companies or generate an Apify plan."

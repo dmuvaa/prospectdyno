@@ -1,4 +1,5 @@
 import { IcpPromptForm } from "@/components/icp/prompt-form";
+import { PageHeader } from "@/components/page-header";
 import { EXAMPLE_PROMPTS } from "@/lib/examples";
 
 export default async function NewIcpPage({
@@ -10,14 +11,12 @@ export default async function NewIcpPage({
 
   return (
     <div className="mx-auto max-w-3xl space-y-6">
-      <div>
-        <p className="text-sm font-medium text-teal-800">ICP Builder</p>
-        <h1 className="font-heading mt-1 text-4xl">Who are you looking for?</h1>
-        <p className="mt-2 text-muted-foreground">
-          Write it the way you would brief a researcher. ProspectDyno will turn it into
-          editable criteria for you to confirm.
-        </p>
-      </div>
+      <PageHeader
+        crumbs={[{ href: "/icps", label: "ICPs" }, { label: "New ICP" }]}
+        kicker="ICP Builder"
+        title="Who are you looking for?"
+        description="Write it the way you would brief a researcher. ProspectDyno will turn it into editable criteria for you to confirm."
+      />
       <IcpPromptForm defaultPrompt={q ?? ""} examples={EXAMPLE_PROMPTS} />
     </div>
   );

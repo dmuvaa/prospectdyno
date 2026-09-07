@@ -7,7 +7,17 @@ export function requireEnv(name: string): string {
 }
 
 export function supabaseUrl(): string {
-  return requireEnv("NEXT_PUBLIC_SUPABASE_URL");
+  const value =
+    process.env.NEXT_PUBLIC_SUPABASE_URL?.trim() ||
+    process.env.SUPABASE_URL?.trim();
+
+  if (!value) {
+    throw new Error(
+      "Missing required environment variable: NEXT_PUBLIC_SUPABASE_URL",
+    );
+  }
+
+  return value;
 }
 
 export function supabasePublishableKey(): string {

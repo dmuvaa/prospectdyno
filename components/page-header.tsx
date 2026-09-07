@@ -1,4 +1,5 @@
 import { Button } from "@/components/ui/button";
+import { Breadcrumbs } from "@/components/breadcrumbs";
 import Link from "next/link";
 import type { ReactNode } from "react";
 
@@ -7,20 +8,25 @@ export function PageHeader({
   title,
   description,
   action,
+  crumbs,
 }: {
   kicker?: string;
   title: string;
   description?: string;
   action?: ReactNode;
+  crumbs?: Array<{ href?: string; label: string }>;
 }) {
   return (
-    <div className="flex flex-wrap items-start justify-between gap-4">
-      <div>
-        {kicker ? <p className="text-sm font-medium text-teal-800">{kicker}</p> : null}
-        <h1 className="font-heading mt-1 text-4xl">{title}</h1>
-        {description ? <p className="mt-2 max-w-2xl text-muted-foreground">{description}</p> : null}
+    <div>
+      {crumbs ? <Breadcrumbs items={crumbs} /> : null}
+      <div className="flex flex-wrap items-start justify-between gap-4">
+        <div>
+          {kicker ? <p className="text-sm font-medium text-teal-800">{kicker}</p> : null}
+          <h1 className="font-heading mt-1 text-4xl">{title}</h1>
+          {description ? <p className="mt-2 max-w-2xl text-muted-foreground">{description}</p> : null}
+        </div>
+        {action}
       </div>
-      {action}
     </div>
   );
 }

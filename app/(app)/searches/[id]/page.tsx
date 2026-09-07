@@ -5,6 +5,8 @@ import { RefreshWhile } from "@/components/refresh-while";
 import { StatusBadge } from "@/components/status-badge";
 import { PageHeader } from "@/components/page-header";
 import { Card, CardHeader, CardTitle } from "@/components/ui/card";
+import { Button } from "@/components/ui/button";
+import { formatDate } from "@/lib/format";
 import { requireWorkspace } from "@/lib/workspace";
 
 export default async function SearchDetailPage({
@@ -32,19 +34,38 @@ export default async function SearchDetailPage({
     : { data: [] };
 
   const running = search.status === "queued" || search.status === "running";
+  const canRetry = search.status === "failed" || search.status === "queued" || search.status === "cancelled";
 
   return (
     <div className="space-y-6">
       <RefreshWhile active={running} />
       <PageHeader
+        crumbs={[
+          { href: "/searches", label: "Searches" },
+          { label: search.name },
+        ]}
         kicker={search.provider}
         title={search.name}
         description={search.original_request ?? "Discovery run"}
-        action={<StatusBadge status={search.status} />}
+        action={
+          <div className="flex flex-wrap items-center gap-2">
+            <StatusBadge status={search.status} />
+            {canRetry ? <RetrySearchButton searchId={search.id} /> : null}
+            {search.icp_id ? (
+              <Button asChild variant="outline">
+                <Link href={`/icps/${search.icp_id}`}>Open ICP</Link>
+              </Button>
+            ) : null}
+          </div>
+        }
       />
       {search.error ? <p className="text-sm text-destructive">{search.error}</p> : null}
-      {running ? <p className="text-sm text-muted-foreground">Working through discovery, website analysis, and qualification…</p> : null}
-      {search.status === "failed" ? <RetrySearchButton searchId={search.id} /> : null}
+      {running ? (
+        <p className="text-sm text-muted-foreground">
+          Working through discovery, website analysis, and qualification. This page refreshes automatically.
+        </p>
+      ) : null}
+      <p className="text-sm text-muted-foreground">Started {formatDate(search.created_at)}</p>
 
       <div className="grid gap-4 sm:grid-cols-3">
         <Card>
@@ -67,19 +88,25 @@ export default async function SearchDetailPage({
         </Card>
       </div>
 
-      <ul className="divide-y divide-border rounded-xl border border-border bg-card">
-        {(companies ?? []).map((company) => (
-          <li key={company.id} className="flex items-center justify-between px-4 py-3">
-            <Link href={`/prospects/${company.id}`} className="font-medium hover:underline">
-              {company.name}
-            </Link>
-            <div className="flex items-center gap-3">
-              <span className="text-sm text-muted-foreground">{company.domain}</span>
-              <StatusBadge status={company.status} />
-            </div>
-          </li>
-        ))}
-      </ul>
+      {(companies ?? []).length > 0 ? (
+        <ul className="divide-y divide-border rounded-xl border border-border bg-card">
+          {(companies ?? []).map((company) => (
+            <li key={company.id} className="flex items-center justify-between px-4 py-3">
+              <Link href={`/prospects/${company.id}`} className="font-medium hover:underline">
+                {company.name}
+              </Link>
+              <div className="flex items-center gap-3">
+                <span className="text-sm text-muted-foreground">{company.domain}</span>
+                <StatusBadge status={company.status} />
+              </div>
+            </li>
+          ))}
+        </ul>
+      ) : (
+        <div className="rounded-xl border border-dashed border-border p-8 text-center text-sm text-muted-foreground">
+          {running ? "Companies will appear here as the worker finishes." : "No companies in this search yet."}
+        </div>
+      )}
     </div>
   );
 }

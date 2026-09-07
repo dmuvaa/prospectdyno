@@ -1,5 +1,7 @@
+import { after } from "next/server";
 import type { SupabaseClient } from "@supabase/supabase-js";
 import type { Database } from "@prospectdyno/supabase/types";
+import { processJob } from "@/lib/pipeline/run-search";
 import { enqueueBullJob } from "@/lib/queue";
 
 export async function enqueueJob(
@@ -27,7 +29,46 @@ export async function enqueueJob(
     throw new Error(error?.message ?? "Could not queue job.");
   }
 
-  await enqueueBullJob(data.id, input.jobType);
+  // Vercel only records the job. The Render background worker polls Supabase.
+  if (process.env.VERCEL) {
+    return data.id;
+  }
+
+  if (await notifyRenderWorker(data.id)) {
+    return data.id;
+  }
+
+  const queued = await enqueueBullJob(data.id, input.jobType);
+  if (!queued) {
+    after(() => {
+      void processJob(data.id);
+    });
+  }
 
   return data.id;
+}
+
+async function notifyRenderWorker(jobId: string) {
+  const workerUrl = process.env.WORKER_URL?.trim();
+  const secret = process.env.WORKER_SECRET?.trim();
+  if (!workerUrl || !secret) return false;
+
+  try {
+    const endpoint = new URL("/api/jobs/process", workerUrl);
+    const response = await fetch(endpoint, {
+      method: "POST",
+      headers: {
+        authorization: `Bearer ${secret}`,
+        "content-type": "application/json",
+      },
+      body: JSON.stringify({ jobId }),
+    });
+    return response.ok;
+  } catch (error) {
+    console.warn(
+      "Could not reach a worker HTTP endpoint; job remains pending in Supabase.",
+      error instanceof Error ? error.message : error,
+    );
+    return false;
+  }
 }

@@ -6,22 +6,58 @@ export const JOB_QUEUE_NAME = "prospectdyno-jobs";
 let queue: Queue | null | undefined;
 let connection: IORedis | null | undefined;
 
+function redisUrl() {
+  return process.env.REDIS_URL?.trim() || "";
+}
+
+function isRenderInternalRedis(url: string) {
+  try {
+    const hostname = new URL(url).hostname;
+    return hostname.startsWith("red-") && !hostname.includes(".");
+  } catch {
+    return false;
+  }
+}
+
+function isOnRender() {
+  return Boolean(process.env.RENDER || process.env.RENDER_SERVICE_ID);
+}
+
+function isOnVercel() {
+  return Boolean(process.env.VERCEL);
+}
+
+export function isRedisQueueConfigured() {
+  const url = redisUrl();
+  if (!url) return false;
+  // Vercel cannot reach Render's private Redis hostname.
+  if (isOnVercel()) return false;
+  if (isRenderInternalRedis(url) && !isOnRender()) return false;
+  return true;
+}
+
 function redisConnection() {
   if (connection !== undefined) return connection;
-  const url = process.env.REDIS_URL;
-  if (!url) {
+  if (!isRedisQueueConfigured()) {
     connection = null;
     return connection;
   }
 
-  connection = new IORedis(url, {
+  connection = new IORedis(redisUrl(), {
     maxRetriesPerRequest: null,
+    enableOfflineQueue: false,
+    lazyConnect: true,
+    retryStrategy(times) {
+      if (times > 8) return null;
+      return Math.min(times * 250, 2000);
+    },
+  });
+  connection.on("error", (error) => {
+    if (process.env.NODE_ENV !== "production") {
+      console.warn("Redis connection error:", error.message);
+    }
   });
   return connection;
-}
-
-export function isRedisQueueConfigured() {
-  return Boolean(process.env.REDIS_URL);
 }
 
 export function getJobQueue() {
@@ -48,8 +84,20 @@ export async function enqueueBullJob(jobId: string, jobType: string) {
   const jobQueue = getJobQueue();
   if (!jobQueue) return false;
 
-  await jobQueue.add(jobType, { jobId }, { jobId });
-  return true;
+  try {
+    const redis = redisConnection();
+    if (redis?.status === "wait") {
+      await redis.connect();
+    }
+    await jobQueue.add(jobType, { jobId }, { jobId });
+    return true;
+  } catch (error) {
+    console.warn(
+      "Could not enqueue BullMQ job; falling back to in-process processing.",
+      error instanceof Error ? error.message : error,
+    );
+    return false;
+  }
 }
 
 export function createBullWorker(handler: (jobId: string) => Promise<unknown>) {

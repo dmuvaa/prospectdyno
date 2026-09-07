@@ -1,6 +1,7 @@
 "use client";
 
 import { useState, useTransition } from "react";
+import { toast } from "sonner";
 import { PROSPECT_STATUSES, type ProspectStatus } from "@prospectdyno/shared";
 import { updateCompanyStatusAction } from "@/lib/actions/company";
 import { updateOpportunityStatusAction } from "@/lib/actions/opportunity";
@@ -26,8 +27,16 @@ export function StatusSelect({
         const next = event.target.value as ProspectStatus;
         setCurrent(next);
         startTransition(async () => {
-          if (target === "company") await updateCompanyStatusAction(id, next);
-          else await updateOpportunityStatusAction(id, next);
+          const result =
+            target === "company"
+              ? await updateCompanyStatusAction(id, next)
+              : await updateOpportunityStatusAction(id, next);
+          if (result.error) {
+            toast.error(result.error);
+            setCurrent(value);
+          } else {
+            toast.success("Status updated");
+          }
         });
       }}
     >

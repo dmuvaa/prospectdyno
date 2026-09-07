@@ -4,6 +4,7 @@ import { updateCompanyNotesAction } from "@/lib/actions/company";
 import { Button } from "@/components/ui/button";
 import { Textarea } from "@/components/ui/textarea";
 import { useState } from "react";
+import { toast } from "sonner";
 
 export function CompanyNotesForm({ companyId, notes }: { companyId: string; notes: string }) {
   const [value, setValue] = useState(notes);
@@ -14,7 +15,9 @@ export function CompanyNotesForm({ companyId, notes }: { companyId: string; note
       onSubmit={async (event) => {
         event.preventDefault();
         setPending(true);
-        await updateCompanyNotesAction(companyId, value);
+        const result = await updateCompanyNotesAction(companyId, value);
+        if (result.error) toast.error(result.error);
+        else toast.success("Notes saved");
         setPending(false);
       }}
     >
