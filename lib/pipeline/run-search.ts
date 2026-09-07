@@ -44,29 +44,37 @@ export async function claimNextJob(
   workerId: string,
   jobTypes?: string[],
 ): Promise<JobRow | null> {
-  const { data, error } = await looseSupabase(admin).rpc<JobRow>("claim_next_job", {
+  const { data, error } = await looseSupabase(admin).rpc<JobRow | JobRow[] | null>("claim_next_job", {
     _worker_id: workerId,
     _job_types: jobTypes ?? null,
   });
 
   if (error) throw new Error(error.message);
-  return data as JobRow | null;
+  const row = Array.isArray(data) ? data[0] : data;
+  if (!isJobId(row?.id)) return null;
+  return row as JobRow;
 }
 
 async function claimJob(admin: Admin, jobId: string, workerId: string): Promise<JobRow | null> {
-  const { data, error } = await looseSupabase(admin).rpc<JobRow>("claim_job", {
+  if (!isJobId(jobId)) return null;
+  const { data, error } = await looseSupabase(admin).rpc<JobRow | null>("claim_job", {
     _job_id: jobId,
     _worker_id: workerId,
   });
 
   if (error) throw new Error(error.message);
-  return data as JobRow | null;
+  if (!isJobId(data?.id)) return null;
+  return data as JobRow;
 }
 
 export async function processJob(
   jobId: string,
   options: { alreadyClaimed?: boolean; workerId?: string } = {},
 ) {
+  if (!isJobId(jobId)) {
+    return { skipped: true, reason: "Missing job id." };
+  }
+
   const admin = createAdminClient();
   const workerId = options.workerId ?? `worker:${process.pid}`;
   const job = options.alreadyClaimed
@@ -80,10 +88,16 @@ export async function processJob(
   return processClaimedJob(admin, job);
 }
 
-async function getJob(admin: Admin, jobId: string): Promise<JobRow> {
-  const { data: job, error } = await admin.from("jobs").select("*").eq("id", jobId).single();
-  if (error || !job) throw new Error(error?.message ?? "Job not found.");
+async function getJob(admin: Admin, jobId: string): Promise<JobRow | null> {
+  if (!isJobId(jobId)) return null;
+  const { data: job, error } = await admin.from("jobs").select("*").eq("id", jobId).maybeSingle();
+  if (error) throw new Error(error.message);
+  if (!job) return null;
   return { ...job, max_attempts: "max_attempts" in job ? Number(job.max_attempts) : 3 } as JobRow;
+}
+
+function isJobId(value: unknown): value is string {
+  return typeof value === "string" && /^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$/i.test(value);
 }
 
 async function processClaimedJob(admin: Admin, job: JobRow) {

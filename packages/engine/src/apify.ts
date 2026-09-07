@@ -112,10 +112,8 @@ export function buildSerpInput(input: { queries: string[]; locations: string[]; 
     .map((query) => (locations[0] && !query.toLowerCase().includes(locations[0].toLowerCase()) ? `${query} ${locations[0]}` : query));
 
   return {
-    queries,
+    queries: queries.join("\n"),
     maxPagesPerQuery: 1,
-    resultsPerPage: Math.min(input.limit ?? 10, 10),
-    mobileResults: false,
   };
 }
 
@@ -331,7 +329,8 @@ async function runActor(
   );
 
   if (!startResponse.ok) {
-    throw new Error(`Apify run failed (${startResponse.status}) for ${actorId}.`);
+    const detail = await apifyErrorDetail(startResponse);
+    throw new Error(`Apify run failed (${startResponse.status}) for ${actorId}${detail}.`);
   }
 
   const started = (await startResponse.json()) as {
@@ -505,4 +504,17 @@ function isRecord(value: unknown): value is ApifyItem {
 
 function sleep(ms: number) {
   return new Promise((resolve) => setTimeout(resolve, ms));
+}
+
+async function apifyErrorDetail(response: Response) {
+  try {
+    const body = (await response.json()) as { error?: { message?: string }; message?: string };
+    const message = body.error?.message ?? body.message;
+    if (typeof message === "string" && message.trim()) {
+      return `: ${message.trim().slice(0, 300)}`;
+    }
+  } catch {
+    // Ignore non-JSON error bodies.
+  }
+  return "";
 }

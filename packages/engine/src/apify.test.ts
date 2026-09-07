@@ -35,11 +35,11 @@ describe("buildGoogleMapsInput", () => {
 describe("buildSerpInput", () => {
   it("appends the first location to queries that do not already include it", () => {
     expect(buildSerpInput({
-      queries: ["local SEO agency"],
+      queries: ["local SEO agency", "PPC agency"],
       locations: ["Manchester"],
       limit: 10,
-    })).toMatchObject({
-      queries: ["local SEO agency Manchester"],
+    })).toEqual({
+      queries: "local SEO agency Manchester\nPPC agency Manchester",
       maxPagesPerQuery: 1,
     });
   });
