@@ -12,7 +12,7 @@ export async function exportCompaniesCsv(companyIds?: string[]) {
   const db = looseSupabase(supabase);
   let query = supabase
     .from("companies")
-    .select("name, domain, website, country, city, industry, employee_count, status, description")
+    .select("id, name, domain, website, country, city, industry, employee_count, status, description")
     .eq("workspace_id", workspace.id)
     .order("created_at", { ascending: false });
 
@@ -40,10 +40,30 @@ export async function exportCompaniesCsv(companyIds?: string[]) {
     return !domain || !suppressedDomains.has(domain);
   });
 
+  const exportIds = exportable.map((row) => row.id);
+  const { data: contacts } = exportIds.length
+    ? await supabase
+        .from("contacts")
+        .select("company_id, email, phone")
+        .eq("workspace_id", workspace.id)
+        .in("company_id", exportIds)
+    : { data: [] as Array<{ company_id: string; email: string | null; phone: string | null }> };
+
+  const contactByCompany = new Map<string, { email: string | null; phone: string | null }>();
+  for (const contact of contacts ?? []) {
+    const current = contactByCompany.get(contact.company_id) ?? { email: null, phone: null };
+    contactByCompany.set(contact.company_id, {
+      email: current.email || contact.email,
+      phone: current.phone || contact.phone,
+    });
+  }
+
   const header = [
     "name",
     "domain",
     "website",
+    "email",
+    "phone",
     "country",
     "city",
     "industry",
@@ -51,11 +71,15 @@ export async function exportCompaniesCsv(companyIds?: string[]) {
     "status",
     "description",
   ];
-  const rows = exportable.map((row) =>
-    header
-      .map((key) => csvCell(String((row as Record<string, unknown>)[key] ?? "")))
-      .join(","),
-  );
+  const rows = exportable.map((row) => {
+    const contact = contactByCompany.get(row.id);
+    const values: Record<string, unknown> = {
+      ...row,
+      email: contact?.email ?? "",
+      phone: contact?.phone ?? "",
+    };
+    return header.map((key) => csvCell(String(values[key] ?? ""))).join(",");
+  });
   const csv = [header.join(","), ...rows].join("\n");
   const exportId = crypto.randomUUID();
 

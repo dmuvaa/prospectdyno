@@ -44,7 +44,7 @@ async function pollLoop() {
         continue;
       }
     }
-    await sleep(4000);
+    await sleep(2000);
   }
 }
 

@@ -190,6 +190,10 @@ export async function fetchApifyCandidates(input: {
   queries: string[];
   locations: string[];
   limit?: number;
+  enrichContacts?: boolean;
+  includeReviews?: boolean;
+  includeSerp?: boolean;
+  signal?: AbortSignal;
 }): Promise<Candidate[]> {
   const token = apifyToken();
   const mapsActor = getGoogleMapsActorId();
@@ -208,6 +212,7 @@ export async function fetchApifyCandidates(input: {
   const locations = input.locations.length > 0 ? input.locations : [null];
   const limit = input.limit ?? 25;
   const candidates: Candidate[] = [];
+  const useSerp = Boolean(serpActor && (input.includeSerp ?? !mapsActor));
 
   const add = (candidate: Candidate | null) => {
     if (!candidate) return;
@@ -234,9 +239,10 @@ export async function fetchApifyCandidates(input: {
           locations,
           limit,
           Boolean(contactActor && discoveryActor === contactActor),
+          input.signal,
         )
       : Promise.resolve([] as ApifyItem[]),
-    serpActor ? runSerpDiscovery(token, serpActor, queries, input.locations, limit) : Promise.resolve([] as ApifyItem[]),
+    useSerp ? runSerpDiscovery(token, serpActor!, queries, input.locations, limit, input.signal) : Promise.resolve([] as ApifyItem[]),
   ]);
 
   if (mapsResult.status === "fulfilled") {
@@ -268,18 +274,13 @@ export async function fetchApifyCandidates(input: {
 
   const placeUrls = candidates.map(placeUrlFromCandidate).filter((url): url is string => Boolean(url));
 
-  if (contactActor && contactActor !== discoveryActor && placeUrls.length > 0) {
-    try {
-      const items = await runActor(token, contactActor, buildContactInput(placeUrls), 240_000);
-      for (const item of items) add(toCandidate(item, "apify"));
-    } catch (error) {
-      console.warn("Apify contact scraper failed:", error instanceof Error ? error.message : error);
-    }
+  if (input.enrichContacts && contactActor && contactActor !== discoveryActor && placeUrls.length > 0) {
+    await mergeContactItems(candidates, add, token, contactActor, placeUrls, input.signal);
   }
 
-  if (reviewsActor && placeUrls.length > 0) {
+  if (input.includeReviews && reviewsActor && placeUrls.length > 0) {
     try {
-      const items = await runActor(token, reviewsActor, buildReviewsInput(placeUrls), 240_000);
+      const items = await runActor(token, reviewsActor, buildReviewsInput(placeUrls), 240_000, input.signal);
       attachReviews(candidates, items);
     } catch (error) {
       console.warn("Apify reviews scraper failed:", error instanceof Error ? error.message : error);
@@ -289,6 +290,48 @@ export async function fetchApifyCandidates(input: {
   return candidates.slice(0, limit);
 }
 
+export async function enrichApifyContacts(candidates: Candidate[], signal?: AbortSignal): Promise<Candidate[]> {
+  const token = apifyToken();
+  const contactActor = getContactActorId();
+  const mapsActor = getGoogleMapsActorId();
+  if (!token || !contactActor || contactActor === mapsActor) return candidates;
+
+  const placeUrls = candidates.map(placeUrlFromCandidate).filter((url): url is string => Boolean(url));
+  if (placeUrls.length === 0) return candidates;
+
+  const add = (incoming: Candidate | null) => {
+    if (!incoming) return;
+    const placeId = placeIdFrom(incoming.source_metadata ?? {});
+    const existing = candidates.find((row) => {
+      const existingPlaceId = placeIdFrom(row.source_metadata ?? {});
+      if (placeId && existingPlaceId && placeId === existingPlaceId) return true;
+      if (incoming.domain && row.domain && incoming.domain === row.domain) return true;
+      return row.name === incoming.name;
+    });
+    if (existing) mergeCandidate(existing, incoming);
+  };
+
+  await mergeContactItems(candidates, add, token, contactActor, placeUrls, signal);
+  return candidates;
+}
+
+async function mergeContactItems(
+  _candidates: Candidate[],
+  add: (candidate: Candidate | null) => void,
+  token: string,
+  contactActor: string,
+  placeUrls: string[],
+  signal?: AbortSignal,
+) {
+  try {
+    const items = await runActor(token, contactActor, buildContactInput(placeUrls), 240_000, signal);
+    for (const item of items) add(toCandidate(item, "apify"));
+  } catch (error) {
+    if (signal?.aborted) throw error;
+    console.warn("Apify contact scraper failed:", error instanceof Error ? error.message : error);
+  }
+}
+
 async function runMapsDiscovery(
   token: string,
   actorId: string,
@@ -296,14 +339,17 @@ async function runMapsDiscovery(
   locations: Array<string | null>,
   limit: number,
   scrapeContacts: boolean,
+  signal?: AbortSignal,
 ) {
   const items: ApifyItem[] = [];
   for (const location of locations.slice(0, 8)) {
+    if (signal?.aborted) throw new Error("Stopped.");
     const batch = await runActor(
       token,
       actorId,
       buildGoogleMapsInput({ queries, location, limit, scrapeContacts }),
       180_000,
+      signal,
     );
     items.push(...batch);
     if (items.length >= limit * 2) break;
@@ -317,8 +363,9 @@ async function runSerpDiscovery(
   queries: string[],
   locations: string[],
   limit: number,
+  signal?: AbortSignal,
 ) {
-  return runActor(token, actorId, buildSerpInput({ queries, locations, limit }), 180_000);
+  return runActor(token, actorId, buildSerpInput({ queries, locations, limit }), 180_000, signal);
 }
 
 export async function crawlWebsitePages(urls: string[]): Promise<Map<string, CrawledSite>> {
@@ -361,7 +408,9 @@ async function runActor(
   actorId: string,
   actorInput: Record<string, unknown>,
   timeoutMs = 180_000,
+  signal?: AbortSignal,
 ) {
+  if (signal?.aborted) throw new Error("Stopped.");
   const encoded = encodeActorId(actorId);
   const startResponse = await fetch(
     `https://api.apify.com/v2/acts/${encoded}/runs?token=${encodeURIComponent(token)}`,
@@ -369,6 +418,7 @@ async function runActor(
       method: "POST",
       headers: { "content-type": "application/json" },
       body: JSON.stringify(actorInput),
+      signal,
     },
   );
 
@@ -383,24 +433,40 @@ async function runActor(
   const runId = started.data?.id;
   if (!runId) throw new Error(`Apify did not return a run id for ${actorId}.`);
 
+  const abortRemote = () => {
+    void fetch(
+      `https://api.apify.com/v2/actor-runs/${runId}/abort?token=${encodeURIComponent(token)}`,
+      { method: "POST" },
+    ).catch(() => undefined);
+  };
+  signal?.addEventListener("abort", abortRemote, { once: true });
+
   let status = started.data?.status ?? "RUNNING";
   let datasetId = started.data?.defaultDatasetId;
   const deadline = Date.now() + timeoutMs;
 
-  while (!["SUCCEEDED", "FAILED", "ABORTED", "TIMED-OUT"].includes(status)) {
-    if (Date.now() > deadline) {
-      throw new Error(`Apify run timed out for ${actorId}.`);
+  try {
+    while (!["SUCCEEDED", "FAILED", "ABORTED", "TIMED-OUT"].includes(status)) {
+      if (signal?.aborted) throw new Error("Stopped.");
+      if (Date.now() > deadline) {
+        abortRemote();
+        throw new Error(`Apify run timed out for ${actorId}.`);
+      }
+      await sleep(2000);
+      const poll = await fetch(
+        `https://api.apify.com/v2/actor-runs/${runId}?token=${encodeURIComponent(token)}`,
+        { signal },
+      );
+      if (!poll.ok) throw new Error(`Could not poll Apify run for ${actorId}.`);
+      const body = (await poll.json()) as { data?: { status?: string; defaultDatasetId?: string } };
+      status = body.data?.status ?? status;
+      datasetId = body.data?.defaultDatasetId ?? datasetId;
     }
-    await sleep(4000);
-    const poll = await fetch(
-      `https://api.apify.com/v2/actor-runs/${runId}?token=${encodeURIComponent(token)}`,
-    );
-    if (!poll.ok) throw new Error(`Could not poll Apify run for ${actorId}.`);
-    const body = (await poll.json()) as { data?: { status?: string; defaultDatasetId?: string } };
-    status = body.data?.status ?? status;
-    datasetId = body.data?.defaultDatasetId ?? datasetId;
+  } finally {
+    signal?.removeEventListener("abort", abortRemote);
   }
 
+  if (status === "ABORTED") throw new Error("Stopped.");
   if (status !== "SUCCEEDED") {
     throw new Error(`Apify run ${status.toLowerCase()} for ${actorId}.`);
   }
@@ -408,6 +474,7 @@ async function runActor(
 
   const itemsResponse = await fetch(
     `https://api.apify.com/v2/datasets/${datasetId}/items?token=${encodeURIComponent(token)}&clean=true`,
+    { signal },
   );
   if (!itemsResponse.ok) {
     throw new Error(`Could not read Apify results for ${actorId}.`);

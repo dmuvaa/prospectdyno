@@ -5,7 +5,9 @@ export function StatusBadge({ status }: { status: string }) {
   const variant =
     status === "QUALIFIED" || status === "approved" || status === "completed" || status === "CUSTOMER" || status === "ready"
       ? "success"
-      : status === "failed" || status === "NOT_INTERESTED" || status === "SUPPRESSED" || status === "missing"
+      : status === "cancelled"
+        ? "warning"
+        : status === "failed" || status === "NOT_INTERESTED" || status === "SUPPRESSED" || status === "missing"
         ? "danger"
         : status === "running" || status === "queued" || status === "pending_review" || status === "RESEARCHING"
           ? "warning"

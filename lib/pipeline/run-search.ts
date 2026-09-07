@@ -1,9 +1,7 @@
 import { qualifyCompany } from "@prospectdyno/ai";
 import {
   analyzeWebsite,
-  apifyScraperStatus,
-  crawlWebsitePages,
-  crawledSiteFor,
+  enrichApifyContacts,
   fetchApifyCandidates,
   normalizeDomain,
   opportunityScore,
@@ -30,7 +28,16 @@ type JobRow = Database["public"]["Tables"]["jobs"]["Row"] & {
 };
 
 const SEARCH_LIMIT = 25;
+const SCORE_CONCURRENCY = 6;
+const STOPPED_MESSAGE = "Stopped. Companies found so far were kept.";
 const SCORING_VERSION = "opportunity-v1";
+
+class SearchCancelledError extends Error {
+  constructor(message = STOPPED_MESSAGE) {
+    super(message);
+    this.name = "SearchCancelledError";
+  }
+}
 
 type SearchInput = {
   csv?: string;
@@ -103,16 +110,19 @@ function isJobId(value: unknown): value is string {
 
 async function processClaimedJob(admin: Admin, job: JobRow) {
   try {
+    if (job.status === "cancelled") {
+      return { cancelled: true };
+    }
     if (job.job_type === "run_search" && job.entity_id) {
       const output = await runSearch(admin, job.workspace_id, job.entity_id, job.id);
       await admin
         .from("jobs")
         .update({
-          status: "completed",
+          status: output.cancelled ? "cancelled" : "completed",
           output: output as Json,
           cost: output.cost,
           completed_at: new Date().toISOString(),
-          error: null,
+          error: output.cancelled ? STOPPED_MESSAGE : null,
         })
         .eq("id", job.id);
       return output;
@@ -120,6 +130,27 @@ async function processClaimedJob(admin: Admin, job: JobRow) {
 
     throw new Error(`Unsupported job type: ${job.job_type}`);
   } catch (caught) {
+    if (caught instanceof SearchCancelledError) {
+      await looseSupabase(admin)
+        .from("jobs")
+        .update({
+          status: "cancelled",
+          error: caught.message,
+          locked_by: null,
+          locked_at: null,
+          completed_at: new Date().toISOString(),
+        })
+        .eq("id", job.id);
+      if (job.entity_id) {
+        await admin
+          .from("searches")
+          .update({ status: "cancelled", error: caught.message })
+          .eq("id", job.entity_id)
+          .in("status", ["queued", "running"]);
+      }
+      return { cancelled: true };
+    }
+
     const message = caught instanceof Error ? caught.message : "Job failed.";
     const shouldRetry = job.attempts < job.max_attempts;
     await looseSupabase(admin)
@@ -155,6 +186,14 @@ export async function runSearch(
   const { data: search, error } = await admin.from("searches").select("*").eq("id", searchId).single();
   if (error || !search) throw new Error("Search not found.");
 
+  const abort = new AbortController();
+  const stopWatch = setInterval(() => {
+    void isSearchCancelled(admin, searchId, jobId).then((stopped) => {
+      if (stopped && !abort.signal.aborted) abort.abort();
+    });
+  }, 1500);
+
+  await assertNotCancelled(admin, searchId, jobId);
   await admin.from("searches").update({ status: "running", error: null }).eq("id", searchId);
 
   const agentRunId = await startAgentRun(admin, workspaceId, jobId, "orchestrator", {
@@ -171,9 +210,11 @@ export async function runSearch(
       "discovery",
       search.provider,
       { input },
-      () => loadCandidates(search.provider, input),
+      () => loadCandidates(search.provider, input, abort.signal),
     );
-    const limited = candidates.slice(0, input.limit ?? SEARCH_LIMIT);
+    await assertNotCancelled(admin, searchId, jobId, abort.signal);
+
+    const limited = dedupeCandidates(candidates).slice(0, input.limit ?? SEARCH_LIMIT);
     const saved: Array<{ candidate: Candidate; companyId: string }> = [];
 
     await withAgentStep(
@@ -185,6 +226,7 @@ export async function runSearch(
       { count: limited.length },
       async () => {
         for (const candidate of limited) {
+          await assertNotCancelled(admin, searchId, jobId, abort.signal);
           try {
             const companyId = await upsertCompany(admin, workspaceId, candidate, search.provider);
             await recordCompanyProvenance(admin, workspaceId, companyId, candidate, search.provider);
@@ -197,8 +239,13 @@ export async function runSearch(
               },
               { onConflict: "search_id,company_id" },
             );
-            await maybeSaveContact(admin, workspaceId, companyId, candidate);
-            saved.push({ candidate, companyId });
+            await saveCandidateContacts(admin, workspaceId, companyId, candidate);
+            if (!saved.some((row) => row.companyId === companyId)) {
+              saved.push({ candidate, companyId });
+            } else {
+              const existing = saved.find((row) => row.companyId === companyId);
+              if (existing) existing.candidate = mergeSavedCandidate(existing.candidate, candidate);
+            }
             await admin
               .from("searches")
               .update({
@@ -206,11 +253,11 @@ export async function runSearch(
                 cost: saved.length * CREDIT_COSTS.company_discovery,
               })
               .eq("id", searchId);
-          } catch (error) {
+          } catch (saveError) {
             console.warn(
               "Could not save company",
               candidate.name,
-              error instanceof Error ? error.message : error,
+              saveError instanceof Error ? saveError.message : saveError,
             );
           }
         }
@@ -218,20 +265,25 @@ export async function runSearch(
       },
     );
 
-    const websiteUrls = saved
-      .map(({ candidate }) => candidate.website ?? websiteFromDomain(candidate.domain))
-      .filter((url): url is string => Boolean(url));
-    const crawledSites = apifyScraperStatus().website && websiteUrls.length > 0
-      ? await withAgentStep(
-          admin,
-          workspaceId,
-          agentRunId,
-          "website_analysis",
-          "crawl_websites",
-          { urls: websiteUrls.length },
-          () => crawlWebsitePages(websiteUrls).catch(() => new Map()),
-        )
-      : new Map();
+    const contactEnrichment = search.provider === "apify"
+      ? enrichApifyContacts(saved.map((row) => row.candidate), abort.signal)
+          .then(async (enriched) => {
+            for (const row of saved) {
+              const match = enriched.find((candidate) => candidate.name === row.candidate.name)
+                ?? enriched.find((candidate) => candidate.domain && candidate.domain === row.candidate.domain);
+              if (!match) continue;
+              row.candidate = mergeSavedCandidate(row.candidate, match);
+              await saveCandidateContacts(admin, workspaceId, row.companyId, row.candidate);
+            }
+            return enriched.length;
+          })
+          .catch((enrichError) => {
+            if (!abort.signal.aborted) {
+              console.warn("Contact enrichment failed:", enrichError instanceof Error ? enrichError.message : enrichError);
+            }
+            return 0;
+          })
+      : Promise.resolve(0);
 
     let icpCriteria: IcpInterpretation | null = null;
     if (search.icp_id) {
@@ -242,7 +294,8 @@ export async function runSearch(
     let totalCost = saved.length * CREDIT_COSTS.company_discovery;
     let opportunities = 0;
 
-    for (const { candidate, companyId } of saved) {
+    await mapPool(saved, SCORE_CONCURRENCY, async ({ candidate, companyId }) => {
+      await assertNotCancelled(admin, searchId, jobId, abort.signal);
       try {
         await recordUsage(admin, workspaceId, "company_discovery", CREDIT_COSTS.company_discovery, {
           company_id: companyId,
@@ -264,7 +317,7 @@ export async function runSearch(
             "website_analysis",
             "analyze_website",
             { company_id: companyId, website, name: candidate.name },
-            () => analyzeWebsite(website, crawledSiteFor(crawledSites, website)),
+            () => analyzeWebsite(website, null, abort.signal),
           );
           const { data: websiteAudit } = await admin
             .from("website_audits")
@@ -284,13 +337,24 @@ export async function runSearch(
             scores: analyzed.scores,
             excerpt: analyzed.htmlExcerpt,
           };
+          if (analyzed.emails.length > 0) {
+            candidate.email ||= analyzed.emails[0];
+            const metadata = candidate.source_metadata ?? {};
+            const existingEmails = Array.isArray(metadata.emails) ? metadata.emails.filter((value): value is string => typeof value === "string") : [];
+            candidate.source_metadata = {
+              ...metadata,
+              emails: [...new Set([...existingEmails, ...analyzed.emails])],
+            };
+            await saveCandidateContacts(admin, workspaceId, companyId, candidate);
+          }
           totalCost += CREDIT_COSTS.website_analysis;
           await recordUsage(admin, workspaceId, "website_analysis", CREDIT_COSTS.website_analysis, {
             company_id: companyId,
             search_id: searchId,
             website,
           }, `website_analysis:${searchId}:${companyId}`);
-        } catch {
+        } catch (analyzeError) {
+          if (analyzeError instanceof SearchCancelledError) throw analyzeError;
           audit = null;
         }
       }
@@ -325,34 +389,21 @@ export async function runSearch(
             confidence: report.confidence_score,
           };
           const scored = opportunityScore(scoreInputs);
+          const opportunityId = await upsertOpportunity(admin, {
+            workspaceId,
+            companyId,
+            searchId,
+            icpId: search.icp_id,
+            report,
+            scored,
+            scoreInputs,
+          });
 
-          const { data: opportunity } = await admin
-            .from("opportunities")
-            .insert({
-              workspace_id: workspaceId,
-              company_id: companyId,
-              search_id: searchId,
-              icp_id: search.icp_id,
-              fit_score: clamp(report.fit_score),
-              intent_score: clamp(report.intent_score),
-              opportunity_score: scored,
-              contactability_score: clamp(report.contactability_score),
-              confidence_score: clamp(report.confidence_score),
-              why: report.why as Json,
-              recommended_service: report.recommended_service,
-              recommended_angle: report.recommended_angle,
-              recommended_contact: report.recommended_contact,
-              report: report as Json,
-              status: scored >= 60 ? "QUALIFIED" : "NEW",
-            })
-            .select("id")
-            .single();
-
-          if (opportunity) {
+          if (opportunityId) {
             opportunities += 1;
-            await insertEvidence(admin, workspaceId, companyId, opportunity.id, report);
-            await recordScore(admin, workspaceId, companyId, opportunity.id, scored, scoreInputs);
-            await saveResearchReport(admin, workspaceId, companyId, opportunity.id, {
+            await insertEvidence(admin, workspaceId, companyId, opportunityId, report);
+            await recordScore(admin, workspaceId, companyId, opportunityId, scored, scoreInputs);
+            await saveResearchReport(admin, workspaceId, companyId, opportunityId, {
               report,
               provider: result.provider,
               model: result.model,
@@ -374,7 +425,8 @@ export async function runSearch(
             provider: result.provider,
             cost_usd: result.usage.costUsd,
           }, `qualification:${searchId}:${companyId}`);
-        } catch {
+        } catch (qualifyError) {
+          if (qualifyError instanceof SearchCancelledError) throw qualifyError;
           await admin.from("companies").update({ status: "NEW" }).eq("id", companyId);
         }
       }
@@ -387,13 +439,20 @@ export async function runSearch(
           cost: totalCost,
         })
         .eq("id", searchId);
-    }
+    });
+
+    await contactEnrichment;
 
     const output = {
       companies: saved.length,
       opportunities,
       cost: totalCost,
+      cancelled: false as boolean,
     };
+
+    if (abort.signal.aborted || await isSearchCancelled(admin, searchId, jobId)) {
+      throw new SearchCancelledError();
+    }
 
     await admin
       .from("searches")
@@ -402,18 +461,32 @@ export async function runSearch(
         result_count: saved.length,
         opportunity_count: opportunities,
         cost: totalCost,
+        error: null,
       })
       .eq("id", searchId);
 
     await finishAgentRun(admin, agentRunId, "completed", output);
     return output;
   } catch (caught) {
+    if (caught instanceof SearchCancelledError || abort.signal.aborted) {
+      const message = caught instanceof SearchCancelledError ? caught.message : STOPPED_MESSAGE;
+      await admin
+        .from("searches")
+        .update({ status: "cancelled", error: message })
+        .eq("id", searchId)
+        .in("status", ["queued", "running"]);
+      await finishAgentRun(admin, agentRunId, "cancelled", { stopped: true }, message);
+      throw caught instanceof SearchCancelledError ? caught : new SearchCancelledError(message);
+    }
     await finishAgentRun(admin, agentRunId, "failed", null, caught);
     throw caught;
+  } finally {
+    clearInterval(stopWatch);
+    if (!abort.signal.aborted) abort.abort();
   }
 }
 
-async function loadCandidates(provider: SearchProvider, input: SearchInput): Promise<Candidate[]> {
+async function loadCandidates(provider: SearchProvider, input: SearchInput, signal?: AbortSignal): Promise<Candidate[]> {
   if (provider === "csv" && input.csv) return parseCsv(input.csv);
   if ((provider === "website" || provider === "manual") && input.urls) return parseUrlList(input.urls);
   if (provider === "apify") {
@@ -421,11 +494,79 @@ async function loadCandidates(provider: SearchProvider, input: SearchInput): Pro
       queries: input.queries ?? [],
       locations: input.locations ?? [],
       limit: input.limit ?? SEARCH_LIMIT,
+      enrichContacts: false,
+      includeReviews: false,
+      includeSerp: false,
+      signal,
     });
   }
   if (input.csv) return parseCsv(input.csv);
   if (input.urls) return parseUrlList(input.urls);
   return [];
+}
+
+async function isSearchCancelled(admin: Admin, searchId: string, jobId?: string) {
+  const { data: search } = await admin.from("searches").select("status").eq("id", searchId).maybeSingle();
+  if (search?.status === "cancelled") return true;
+  if (!jobId) return false;
+  const { data: job } = await admin.from("jobs").select("status").eq("id", jobId).maybeSingle();
+  return job?.status === "cancelled";
+}
+
+async function assertNotCancelled(admin: Admin, searchId: string, jobId?: string, signal?: AbortSignal) {
+  if (signal?.aborted || await isSearchCancelled(admin, searchId, jobId)) {
+    throw new SearchCancelledError();
+  }
+}
+
+async function mapPool<T>(items: T[], concurrency: number, worker: (item: T) => Promise<void>) {
+  if (items.length === 0) return;
+  let next = 0;
+  const run = async () => {
+    while (next < items.length) {
+      const current = next;
+      next += 1;
+      const item = items[current];
+      if (item) await worker(item);
+    }
+  };
+  await Promise.all(Array.from({ length: Math.min(concurrency, items.length) }, () => run()));
+}
+
+function dedupeCandidates(candidates: Candidate[]) {
+  const seen = new Set<string>();
+  const unique: Candidate[] = [];
+  for (const candidate of candidates) {
+    const domain = normalizeDomain(candidate.domain ?? candidate.website);
+    const key = domain || `${candidate.name.toLowerCase()}|${(candidate.city ?? "").toLowerCase()}`;
+    if (seen.has(key)) continue;
+    seen.add(key);
+    unique.push(candidate);
+  }
+  return unique;
+}
+
+function mergeSavedCandidate(target: Candidate, incoming: Candidate): Candidate {
+  return {
+    ...target,
+    website: target.website || incoming.website,
+    domain: target.domain || incoming.domain,
+    email: target.email || incoming.email,
+    phone: target.phone || incoming.phone,
+    country: target.country || incoming.country,
+    city: target.city || incoming.city,
+    industry: target.industry || incoming.industry,
+    description: target.description || incoming.description,
+    source_metadata: { ...(incoming.source_metadata ?? {}), ...(target.source_metadata ?? {}) },
+  };
+}
+
+function candidateEmails(candidate: Candidate) {
+  const metadata = candidate.source_metadata ?? {};
+  const extra = Array.isArray(metadata.emails)
+    ? metadata.emails.filter((value): value is string => typeof value === "string")
+    : [];
+  return [...new Set([candidate.email, ...extra].map((value) => value?.trim().toLowerCase()).filter((value): value is string => Boolean(value)))];
 }
 
 async function upsertCompany(
@@ -435,14 +576,37 @@ async function upsertCompany(
   provider: string,
 ) {
   const domain = normalizeDomain(candidate.domain ?? candidate.website);
+  const patch = {
+    website: candidate.website ?? websiteFromDomain(domain),
+    country: candidate.country,
+    city: candidate.city,
+    industry: candidate.industry,
+    description: candidate.description,
+    employee_count: candidate.employee_count,
+    source_metadata: (candidate.source_metadata ?? {}) as Json,
+  };
+
   if (domain) {
     const { data: existing } = await admin
       .from("companies")
-      .select("id")
+      .select("id, website, country, city, industry, description")
       .eq("workspace_id", workspaceId)
       .eq("normalized_domain", domain)
       .maybeSingle();
-    if (existing) return existing.id;
+    if (existing) {
+      await admin
+        .from("companies")
+        .update({
+          website: existing.website || patch.website,
+          country: existing.country || patch.country,
+          city: existing.city || patch.city,
+          industry: existing.industry || patch.industry,
+          description: existing.description || patch.description,
+          source_metadata: patch.source_metadata,
+        })
+        .eq("id", existing.id);
+      return existing.id;
+    }
   } else {
     const { data: existing } = await admin
       .from("companies")
@@ -461,20 +625,83 @@ async function upsertCompany(
       name: candidate.name,
       domain,
       normalized_domain: domain,
-      website: candidate.website ?? websiteFromDomain(domain),
+      website: patch.website,
       country: candidate.country,
       city: candidate.city,
       industry: candidate.industry,
       description: candidate.description,
       employee_count: candidate.employee_count,
       source: provider,
-      source_metadata: (candidate.source_metadata ?? {}) as Json,
+      source_metadata: patch.source_metadata,
     })
     .select("id")
     .single();
 
   if (error || !data) throw new Error(error?.message ?? "Could not save company.");
   return data.id;
+}
+
+async function saveCandidateContacts(
+  admin: Admin,
+  workspaceId: string,
+  companyId: string,
+  candidate: Candidate,
+) {
+  const emails = candidateEmails(candidate);
+  if (emails.length === 0 && !candidate.contact_name && !candidate.phone) return;
+  if (emails.length === 0) {
+    await maybeSaveContact(admin, workspaceId, companyId, candidate);
+    return;
+  }
+  for (const email of emails) {
+    await maybeSaveContact(admin, workspaceId, companyId, { ...candidate, email });
+  }
+}
+
+async function upsertOpportunity(
+  admin: Admin,
+  input: {
+    workspaceId: string;
+    companyId: string;
+    searchId: string;
+    icpId: string | null;
+    report: QualificationReport;
+    scored: number;
+    scoreInputs: Record<string, number>;
+  },
+) {
+  const payload = {
+    workspace_id: input.workspaceId,
+    company_id: input.companyId,
+    search_id: input.searchId,
+    icp_id: input.icpId,
+    fit_score: clamp(input.report.fit_score),
+    intent_score: clamp(input.report.intent_score),
+    opportunity_score: input.scored,
+    contactability_score: clamp(input.report.contactability_score),
+    confidence_score: clamp(input.report.confidence_score),
+    why: input.report.why as Json,
+    recommended_service: input.report.recommended_service,
+    recommended_angle: input.report.recommended_angle,
+    recommended_contact: input.report.recommended_contact,
+    report: input.report as Json,
+    status: (input.scored >= 60 ? "QUALIFIED" : "NEW") as "QUALIFIED" | "NEW",
+  };
+
+  const { data: existing } = await admin
+    .from("opportunities")
+    .select("id")
+    .eq("search_id", input.searchId)
+    .eq("company_id", input.companyId)
+    .maybeSingle();
+
+  if (existing) {
+    await admin.from("opportunities").update(payload).eq("id", existing.id);
+    return existing.id;
+  }
+
+  const { data } = await admin.from("opportunities").insert(payload).select("id").single();
+  return data?.id ?? null;
 }
 
 async function maybeSaveContact(
@@ -486,6 +713,17 @@ async function maybeSaveContact(
   if (!candidate.email && !candidate.contact_name && !candidate.phone) return;
 
   const normalizedEmail = normalizeEmail(candidate.email);
+  if (!normalizedEmail && candidate.phone) {
+    const { data: existingPhone } = await admin
+      .from("contacts")
+      .select("id")
+      .eq("workspace_id", workspaceId)
+      .eq("company_id", companyId)
+      .eq("phone", candidate.phone)
+      .maybeSingle();
+    if (existingPhone) return;
+  }
+
   const payload = {
     workspace_id: workspaceId,
     company_id: companyId,
@@ -690,7 +928,7 @@ async function startAgentRun(
 async function finishAgentRun(
   admin: Admin,
   agentRunId: string,
-  status: "completed" | "failed",
+  status: "completed" | "failed" | "cancelled",
   output: Record<string, unknown> | null,
   error?: unknown,
 ) {
@@ -699,7 +937,7 @@ async function finishAgentRun(
     .update({
       status,
       output,
-      error: error instanceof Error ? error.message : null,
+      error: typeof error === "string" ? error : error instanceof Error ? error.message : null,
       completed_at: new Date().toISOString(),
     })
     .eq("id", agentRunId);
@@ -757,16 +995,19 @@ async function withAgentStep<T>(
     }
     return output;
   } catch (caught) {
+    const stopped = caught instanceof SearchCancelledError
+      || (caught instanceof Error && /stopped/i.test(caught.message));
     if (step?.id) {
       await looseSupabase(admin)
         .from("agent_steps")
         .update({
           duration_ms: Date.now() - started,
-          status: "failed",
-          error: caught instanceof Error ? caught.message : "Step failed.",
+          status: stopped ? "cancelled" : "failed",
+          error: stopped ? STOPPED_MESSAGE : caught instanceof Error ? caught.message : "Step failed.",
         })
         .eq("id", step.id);
     }
+    if (stopped && !(caught instanceof SearchCancelledError)) throw new SearchCancelledError();
     throw caught;
   }
 }

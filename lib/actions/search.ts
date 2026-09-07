@@ -8,6 +8,7 @@ import { recordAudit } from "@/lib/audit";
 import { enqueueJob } from "@/lib/jobs";
 import { consumeCredits, idempotencyKey } from "@/lib/metering";
 import { requireWorkspace } from "@/lib/workspace";
+import { looseSupabase } from "@/lib/supabase-loose";
 import type { SupabaseClient } from "@supabase/supabase-js";
 import type { Database } from "@prospectdyno/supabase/types";
 
@@ -147,6 +148,45 @@ export async function createSearchJobForWorkspace(
   }
 
   return { id: search.id };
+}
+
+export async function cancelSearchAction(searchId: string) {
+  const { supabase, workspace } = await requireWorkspace();
+  const { data: search } = await supabase
+    .from("searches")
+    .select("id, status")
+    .eq("id", searchId)
+    .eq("workspace_id", workspace.id)
+    .single();
+  if (!search) return { error: "Search not found." };
+  if (search.status !== "queued" && search.status !== "running") {
+    return { error: "This hunt is not running." };
+  }
+
+  const message = "Stopped. Companies found so far were kept.";
+  await supabase
+    .from("searches")
+    .update({ status: "cancelled", error: message })
+    .eq("id", searchId)
+    .eq("workspace_id", workspace.id);
+
+  await looseSupabase(supabase)
+    .from("jobs")
+    .update({
+      status: "cancelled",
+      error: message,
+      locked_by: null,
+      locked_at: null,
+      completed_at: new Date().toISOString(),
+    })
+    .eq("workspace_id", workspace.id)
+    .eq("entity_id", searchId)
+    .in("status", ["pending", "running"]);
+
+  revalidatePath("/dashboard");
+  revalidatePath("/searches");
+  revalidatePath(`/searches/${searchId}`);
+  return { ok: true };
 }
 
 export async function retrySearchAction(searchId: string) {

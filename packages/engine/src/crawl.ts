@@ -9,12 +9,14 @@ const UA =
 export async function analyzeWebsite(
   url: string,
   crawled?: CrawledSite | null,
+  signal?: AbortSignal,
 ): Promise<{
   summary: WebsiteAuditSummary;
   scores: WebsiteScores;
   htmlExcerpt: string;
+  emails: string[];
 }> {
-  const fetched = await fetchWebsite(url).catch(() => null);
+  const fetched = await fetchWebsite(url, signal).catch(() => null);
   if (fetched && crawled?.text) {
     return {
       summary: {
@@ -25,6 +27,7 @@ export async function analyzeWebsite(
       },
       scores: fetched.scores,
       htmlExcerpt: crawled.text.slice(0, 4000),
+      emails: uniqueEmails([...fetched.emails, ...extractEmails(crawled.text, url)]),
     };
   }
   if (crawled?.text) return fromCrawled(crawled);
@@ -32,12 +35,15 @@ export async function analyzeWebsite(
   throw new Error(`Could not fetch ${url}`);
 }
 
-async function fetchWebsite(url: string) {
+async function fetchWebsite(url: string, signal?: AbortSignal) {
   const controller = new AbortController();
-  const timer = setTimeout(() => controller.abort(), 12000);
+  const timer = setTimeout(() => controller.abort(), 8000);
+  const onAbort = () => controller.abort();
+  signal?.addEventListener("abort", onAbort, { once: true });
 
   let html = "";
   try {
+    if (signal?.aborted) throw new Error("Stopped.");
     const response = await fetch(url, {
       signal: controller.signal,
       redirect: "follow",
@@ -46,9 +52,10 @@ async function fetchWebsite(url: string) {
     html = await response.text();
   } finally {
     clearTimeout(timer);
+    signal?.removeEventListener("abort", onAbort);
   }
 
-  return summarizeHtml(html);
+  return summarizeHtml(html, url);
 }
 
 function fromCrawled(crawled: CrawledSite) {
@@ -68,12 +75,22 @@ function fromCrawled(crawled: CrawledSite) {
     has_viewport: true,
     word_count: wordCount,
   };
-  return { summary, scores: scoreSummary(summary, text.length), htmlExcerpt: text.slice(0, 4000) };
+  return {
+    summary,
+    scores: scoreSummary(summary, text.length),
+    htmlExcerpt: text.slice(0, 4000),
+    emails: extractEmails(text, crawled.url),
+  };
 }
 
-function summarizeHtml(html: string) {
+function summarizeHtml(html: string, pageUrl?: string) {
   const $ = cheerio.load(html);
   $("script, style, noscript").remove();
+
+  const mailto = $("a[href^='mailto:']")
+    .map((_, el) => $(el).attr("href") ?? "")
+    .get()
+    .join(" ");
 
   const technologies = detectTechnologies(html, $);
   const h1 = $("h1")
@@ -92,7 +109,7 @@ function summarizeHtml(html: string) {
     technologies,
     has_form: $("form").length > 0,
     has_tel: $('a[href^="tel:"]').length > 0,
-    has_mailto: $('a[href^="mailto:"]').length > 0,
+    has_mailto: $('a[href^="mailto:"]').length > 0 || extractEmails(html, pageUrl).length > 0,
     has_viewport: $('meta[name="viewport"]').length > 0,
     word_count: text.split(" ").filter(Boolean).length,
   };
@@ -101,7 +118,40 @@ function summarizeHtml(html: string) {
     summary,
     scores: scoreSummary(summary, html.length),
     htmlExcerpt: text.slice(0, 4000),
+    emails: extractEmails(`${mailto} ${html}`, pageUrl),
   };
+}
+
+const JUNK_LOCAL = /^(noreply|no-reply|donotreply|privacy|legal|webmaster|mailer-daemon)$/i;
+const JUNK_DOMAIN = /(?:sentry\.io|wixpress\.com|example\.com|domain\.com|email\.com|cloudflare\.com|schema\.org)$/i;
+
+export function extractEmails(text: string, pageUrl?: string | null): string[] {
+  const matches = text.match(/[A-Z0-9._%+-]+@[A-Z0-9.-]+\.[A-Z]{2,}/gi) ?? [];
+  const emails = uniqueEmails(
+    matches
+      .map((value) => value.replace(/^mailto:/i, "").split("?")[0]?.trim().toLowerCase() ?? "")
+      .filter((email) => {
+        const [local, domain] = email.split("@");
+        return Boolean(local && domain && !JUNK_LOCAL.test(local) && !JUNK_DOMAIN.test(domain) && !/\.(png|jpe?g|gif|webp|svg)$/i.test(email));
+      }),
+  );
+  const host = hostFrom(pageUrl);
+  if (!host) return emails.slice(0, 8);
+  const sameDomain = emails.filter((email) => email.endsWith(`@${host}`) || email.endsWith(`.${host}`));
+  return uniqueEmails([...sameDomain, ...emails]).slice(0, 8);
+}
+
+function uniqueEmails(values: string[]) {
+  return [...new Set(values.filter(Boolean))];
+}
+
+function hostFrom(url?: string | null) {
+  if (!url) return null;
+  try {
+    return new URL(url.includes("://") ? url : `https://${url}`).hostname.replace(/^www\./, "").toLowerCase();
+  } catch {
+    return null;
+  }
 }
 
 function scoreSummary(summary: WebsiteAuditSummary, bytes: number): WebsiteScores {

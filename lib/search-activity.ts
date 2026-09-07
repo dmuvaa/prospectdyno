@@ -21,6 +21,9 @@ function nestedRecord(value: unknown, key: string) {
 }
 
 export function activityLabel(step: SearchActivityStep) {
+  if (step.status === "cancelled") {
+    return step.error ?? "Stopped";
+  }
   const candidate = nestedRecord(step.input, "candidate");
   const name = String(candidate?.name ?? step.input?.name ?? "");
   const website = String(step.input?.website ?? candidate?.website ?? candidate?.domain ?? "");
@@ -62,7 +65,7 @@ export function activityLabel(step: SearchActivityStep) {
 export function pipelineStages(status: string, steps: SearchActivityStep[]) {
   const types = new Set(
     steps
-      .filter((step) => step.status !== "failed")
+      .filter((step) => step.status !== "failed" && step.status !== "cancelled")
       .map((step) => (step.step_type === "normalization" ? "discovery" : step.step_type)),
   );
   const rawCurrent = [...steps].reverse().find((step) => step.status === "running")?.step_type
@@ -82,7 +85,11 @@ export function pipelineStages(status: string, steps: SearchActivityStep[]) {
     let state: "done" | "current" | "pending" = "pending";
     if (status === "completed" || (item.id === "completed" && status === "completed")) state = "done";
     else if (item.id === "queued") state = status === "queued" && !current ? "current" : "done";
-    else if (item.id === "completed") state = status === "completed" ? "done" : "pending";
+    else if (item.id === "completed") {
+      if (status === "completed") state = "done";
+      else if (status === "cancelled" || status === "failed") state = "pending";
+      else state = "pending";
+    }
     else if (current === item.id) state = "current";
     else if (!current && status === "running" && item.id === "discovery") state = "current";
     else if (types.has(item.id) && current !== item.id) state = "done";

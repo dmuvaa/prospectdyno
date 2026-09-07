@@ -3,6 +3,7 @@ import { HuntComposer } from "@/components/hunt-composer";
 import { InboxActions } from "@/components/inbox-actions";
 import { RefreshWhile } from "@/components/refresh-while";
 import { RetrySearchButton } from "@/components/retry-search";
+import { StopHuntButton } from "@/components/stop-hunt";
 import { StatusBadge } from "@/components/status-badge";
 import { Card, CardContent, CardDescription, CardHeader, CardTitle } from "@/components/ui/card";
 import { Button } from "@/components/ui/button";
@@ -128,7 +129,10 @@ export default async function DashboardPage({
                           {search.result_count} found · {search.opportunity_count} scored
                         </p>
                       </div>
-                      <StatusBadge status={search.status} />
+                      <div className="flex shrink-0 items-center gap-2">
+                        <StatusBadge status={search.status} />
+                        <StopHuntButton searchId={search.id} compact />
+                      </div>
                     </li>
                   ))}
                 </ul>

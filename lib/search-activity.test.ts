@@ -23,6 +23,13 @@ describe("activityLabel", () => {
       output: { count: 25 },
     }))).toBe("Saved 25 companies");
   });
+
+  it("uses the stop message when a hunt is cancelled", () => {
+    expect(activityLabel(step({
+      status: "cancelled",
+      error: "Stopped. Companies found so far were kept.",
+    }))).toBe("Stopped. Companies found so far were kept.");
+  });
 });
 
 describe("pipelineStages", () => {

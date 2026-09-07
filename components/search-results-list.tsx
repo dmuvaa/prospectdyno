@@ -1,23 +1,13 @@
 "use client";
 
 import Link from "next/link";
-import { useMemo, useState } from "react";
+import { useEffect, useMemo, useRef, useState } from "react";
+import type { SearchCompanyRow } from "@/lib/search-live-data";
 import { InboxActions } from "@/components/inbox-actions";
 import { StatusBadge } from "@/components/status-badge";
 import { Input } from "@/components/ui/input";
 
-export type SearchCompanyRow = {
-  id: string;
-  name: string;
-  domain: string | null;
-  city: string | null;
-  country: string | null;
-  industry: string | null;
-  status: string;
-  score: number | null;
-  angle: string | null;
-  opportunityId: string | null;
-};
+export type { SearchCompanyRow };
 
 export function SearchResultsList({
   companies,
@@ -32,7 +22,18 @@ export function SearchResultsList({
 }) {
   const [query, setQuery] = useState("");
   const [status, setStatus] = useState("");
+  const seen = useRef(new Set(companies.map((company) => company.id)));
+  const [freshIds, setFreshIds] = useState<Set<string>>(new Set());
   const total = Math.max(companies.length, persistedCount ?? 0);
+
+  useEffect(() => {
+    const newcomers = companies.filter((company) => !seen.current.has(company.id)).map((company) => company.id);
+    if (newcomers.length === 0) return;
+    for (const id of newcomers) seen.current.add(id);
+    setFreshIds(new Set(newcomers));
+    const timer = setTimeout(() => setFreshIds(new Set()), 1200);
+    return () => clearTimeout(timer);
+  }, [companies]);
 
   const statuses = useMemo(
     () => [...new Set(companies.map((company) => company.status))].sort(),
@@ -45,7 +46,7 @@ export function SearchResultsList({
       .filter((company) => {
         if (status && company.status !== status) return false;
         if (!term) return true;
-        return [company.name, company.domain, company.city, company.country, company.industry]
+        return [company.name, company.domain, company.city, company.country, company.industry, company.email]
           .filter(Boolean)
           .some((value) => value!.toLowerCase().includes(term));
       })
@@ -65,7 +66,10 @@ export function SearchResultsList({
             ? `${total} companies`
             : `${visible.length} of ${total} companies`}
           {" · "}
-          {opportunityCount} opportunities
+            {opportunityCount} scored
+            {companies.filter((company) => company.email).length
+              ? ` · ${companies.filter((company) => company.email).length} emails`
+              : ""}
         </p>
         {companies.length > 0 ? (
           <div className="flex flex-wrap items-center gap-2">
@@ -95,7 +99,10 @@ export function SearchResultsList({
           {visible.map((company) => {
             const location = [company.city, company.country].filter(Boolean).join(", ");
             return (
-              <li key={company.id} className="rounded-xl border border-border bg-card p-4 shadow-sm">
+              <li
+                key={company.id}
+                className={`rounded-xl border border-border bg-card p-4 shadow-sm ${freshIds.has(company.id) ? "animate-rise-in ring-1 ring-teal-700/30" : ""}`}
+              >
                 <div className="flex items-start justify-between gap-3">
                   <div className="min-w-0">
                     <Link href={`/prospects/${company.id}`} className="font-medium hover:underline">
@@ -104,6 +111,14 @@ export function SearchResultsList({
                     <p className="text-sm text-muted-foreground">
                       {[company.domain, location, company.industry].filter(Boolean).join(" · ")}
                     </p>
+                    {company.email ? (
+                      <a href={`mailto:${company.email}`} className="mt-1 block text-sm text-teal-800 hover:underline">
+                        {company.email}
+                      </a>
+                    ) : running && !company.score ? (
+                      <p className="mt-1 text-xs text-muted-foreground">Looking up email…</p>
+                    ) : null}
+                    {company.phone ? <p className="text-sm text-muted-foreground">{company.phone}</p> : null}
                     {company.angle ? <p className="mt-1 text-sm">{company.angle}</p> : null}
                   </div>
                   <div className="text-right">
