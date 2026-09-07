@@ -55,7 +55,7 @@ Rules:
 - If the website excerpt is thin, lower confidence rather than inventing services.
 - If source_metadata.reviews are present, use them as evidence for reputation and buying signals.
 - recommended_contact is a title, not a fabricated person.`,
-    user: JSON.stringify(input).slice(0, 12000),
+    user: JSON.stringify(qualifyModelInput(input)),
     schema: {
       type: "object",
       additionalProperties: false,
@@ -120,4 +120,30 @@ Rules:
       },
     },
   });
+}
+
+function qualifyModelInput(input: {
+  icp: unknown;
+  company: unknown;
+  audit: unknown;
+  excerpt: string;
+}) {
+  return {
+    icp: input.icp,
+    company: compactCompany(input.company),
+    audit: input.audit,
+    excerpt: input.excerpt.slice(0, 3500),
+  };
+}
+
+function compactCompany(company: unknown) {
+  if (!company || typeof company !== "object" || Array.isArray(company)) return company;
+  const row = company as Record<string, unknown>;
+  const metadata = row.source_metadata;
+  const reviews =
+    metadata && typeof metadata === "object" && !Array.isArray(metadata)
+      ? (metadata as Record<string, unknown>).reviews
+      : undefined;
+  const { source_metadata: _ignored, ...rest } = row;
+  return reviews === undefined ? rest : { ...rest, source_metadata: { reviews } };
 }

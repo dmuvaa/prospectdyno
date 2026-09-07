@@ -88,18 +88,36 @@ export function buildGoogleMapsInput(input: {
   scrapeContacts?: boolean;
 }) {
   const queries = input.queries.map((query) => query.trim()).filter(Boolean).slice(0, 8);
-  const perSearchLimit = Math.max(1, Math.ceil((input.limit ?? 25) / Math.max(queries.length, 1)));
+  const perSearchLimit = Math.min(50, Math.max(5, Math.ceil((input.limit ?? 25) / Math.max(queries.length, 1))));
 
   return {
     searchStringsArray: queries,
     locationQuery: input.location || undefined,
-    maxCrawledPlacesPerSearch: Math.min(perSearchLimit, 20),
+    maxCrawledPlacesPerSearch: perSearchLimit,
     language: "en",
     website: "allPlaces",
     skipClosedPlaces: true,
-    scrapePlaceDetailPage: Boolean(input.scrapeContacts),
+    scrapePlaceDetailPage: false,
     scrapeContacts: Boolean(input.scrapeContacts),
     includeWebResults: false,
+    searchMatching: "all",
+    placeMinimumStars: "",
+    scrapeTableReservationProvider: false,
+    scrapeOrderOnline: false,
+    scrapeDirectories: false,
+    maxQuestions: 0,
+    scrapeSocialMediaProfiles: {
+      facebooks: false,
+      instagrams: false,
+      youtubes: false,
+      tiktoks: false,
+      twitters: false,
+    },
+    maximumLeadsEnrichmentRecords: 0,
+    verifyLeadsEnrichmentEmails: false,
+    maxReviews: 0,
+    reviewsSort: "newest",
+    reviewsOrigin: "all",
   };
 }
 
@@ -140,12 +158,31 @@ export function buildReviewsInput(placeUrls: string[]) {
 }
 
 export function buildContactInput(placeUrls: string[]) {
+  const startUrls = [...new Set(placeUrls.filter(Boolean))].slice(0, 50).map((url) => ({ url }));
   return {
-    startUrls: [...new Set(placeUrls)].slice(0, 25).map((url) => ({ url })),
-    maxCrawledPlaces: Math.min(placeUrls.length, 25),
+    startUrls,
+    maxCrawledPlaces: startUrls.length,
     language: "en",
     scrapeContacts: true,
     website: "allPlaces",
+    searchMatching: "all",
+    placeMinimumStars: "",
+    skipClosedPlaces: false,
+    scrapePlaceDetailPage: false,
+    scrapeTableReservationProvider: false,
+    scrapeOrderOnline: false,
+    includeWebResults: false,
+    scrapeDirectories: false,
+    maxQuestions: 0,
+    scrapeSocialMediaProfiles: {
+      facebooks: false,
+      instagrams: false,
+      youtubes: false,
+      tiktoks: false,
+      twitters: false,
+    },
+    maximumLeadsEnrichmentRecords: 0,
+    verifyLeadsEnrichmentEmails: false,
   };
 }
 
@@ -174,9 +211,13 @@ export async function fetchApifyCandidates(input: {
 
   const add = (candidate: Candidate | null) => {
     if (!candidate) return;
-    const existing = candidate.domain
-      ? candidates.find((row) => row.domain === candidate.domain)
-      : candidates.find((row) => row.name === candidate.name && row.city === candidate.city);
+    const placeId = placeIdFrom(candidate.source_metadata ?? {});
+    const existing = candidates.find((row) => {
+      const existingPlaceId = placeIdFrom(row.source_metadata ?? {});
+      if (placeId && existingPlaceId && placeId === existingPlaceId) return true;
+      if (candidate.domain && row.domain && candidate.domain === row.domain) return true;
+      return !candidate.domain && !row.domain && row.name === candidate.name && row.city === candidate.city;
+    });
     if (existing) {
       mergeCandidate(existing, candidate);
       return;
@@ -199,7 +240,10 @@ export async function fetchApifyCandidates(input: {
   ]);
 
   if (mapsResult.status === "fulfilled") {
-    for (const item of mapsResult.value) add(toCandidate(item, "apify"));
+    for (const item of mapsResult.value) {
+      if (!isBusinessPlace(item)) continue;
+      add(toCandidate(item, "apify"));
+    }
   } else {
     console.warn("Apify Maps discovery failed:", mapsResult.reason instanceof Error ? mapsResult.reason.message : mapsResult.reason);
   }
@@ -391,33 +435,100 @@ function serpItemsToCandidates(items: ApifyItem[]): Candidate[] {
     });
 }
 
-function toCandidate(item: ApifyItem, source: Candidate["source"]): Candidate | null {
+export function candidateFromApifyItem(item: ApifyItem, source: Candidate["source"] = "apify"): Candidate | null {
   const mapsUrl = firstText(item.placeUrl, item.googleMapsUri, item.googleMapsUrl, mapsLike(item.url));
-  const website = firstText(item.website, item.websiteUrl, websiteLike(item.url), websiteLike(item.link), item.domain);
+  const website = firstText(item.website, item.websiteUrl, websiteLike(item.url), websiteLike(item.link));
   const domain = normalizeDomain(website);
-  const name = firstText(item.name, item.title, item.placeName, item.businessName) ?? domain;
+  const name = firstText(item.title, item.name, item.placeName, item.businessName) ?? domain;
   if (!name) return null;
 
-  const categories = Array.isArray(item.categories)
-    ? item.categories.filter((value): value is string => typeof value === "string")
-    : [];
+  const categories = stringList(item.categories);
+  const emails = stringList(item.emails);
+  const country = countryFromCode(firstText(item.country, item.addressCountry, item.countryCode));
 
   return {
     name,
     website: website ?? websiteFromDomain(domain),
     domain,
-    country: firstText(item.country, item.addressCountry),
+    country,
     city: firstText(item.city, item.addressCity, item.neighborhood),
     industry: firstText(item.categoryName, item.category, item.industry) ?? categories[0] ?? null,
     description: firstText(item.description, item.about, item.subtitle, item.snippet),
-    email: firstText(item.email, item.emailAddress, item.emails),
-    phone: firstText(item.phone, item.phoneNumber, item.phoneUnformatted),
+    email: emails[0] ?? firstText(item.email, item.emailAddress),
+    phone: firstText(item.phone, item.phoneNumber, item.phoneUnformatted) || null,
     source,
-    source_metadata: {
-      ...item,
+    source_metadata: compactPlace(item, {
       placeUrl: mapsUrl ?? firstText(item.url),
-    },
+      placeId: placeIdFrom(item),
+      emails,
+      categories,
+      totalScore: numberValue(item.totalScore),
+      reviewsCount: numberValue(item.reviewsCount),
+    }),
   };
+}
+
+function toCandidate(item: ApifyItem, source: Candidate["source"]): Candidate | null {
+  return candidateFromApifyItem(item, source);
+}
+
+function compactPlace(item: ApifyItem, extra: Record<string, unknown>): Record<string, unknown> {
+  return {
+    title: firstText(item.title, item.name),
+    website: firstText(item.website),
+    phone: firstText(item.phone),
+    city: firstText(item.city),
+    countryCode: firstText(item.countryCode),
+    categoryName: firstText(item.categoryName),
+    street: firstText(item.street),
+    url: firstText(item.url),
+    ...extra,
+  };
+}
+
+function placeIdFrom(item: ApifyItem) {
+  const explicit = firstText(item.placeId, item.place_id);
+  if (explicit) return explicit;
+  const url = firstText(item.url, item.placeUrl);
+  const match = url?.match(/query_place_id=([^&]+)/);
+  return match?.[1] ? decodeURIComponent(match[1]) : null;
+}
+
+const NON_BUSINESS_CATEGORIES = /^(landmark|tourist attraction|shopping mall|park|museum|church|swimming pool|gas station|parking lot)$/i;
+
+export function isBusinessPlace(item: Record<string, unknown>) {
+  const categories = [...stringList(item.categories), firstText(item.categoryName)].filter(
+    (value): value is string => Boolean(value),
+  );
+  if (categories.length === 0) return true;
+  return categories.some((category) => !NON_BUSINESS_CATEGORIES.test(category.trim()));
+}
+
+function stringList(value: unknown): string[] {
+  if (!Array.isArray(value)) return [];
+  return value.filter((item): item is string => typeof item === "string" && Boolean(item.trim()));
+}
+
+const COUNTRY_NAMES: Record<string, string> = {
+  KE: "Kenya",
+  US: "United States",
+  GB: "United Kingdom",
+  UK: "United Kingdom",
+  AE: "United Arab Emirates",
+  NG: "Nigeria",
+  ZA: "South Africa",
+  IN: "India",
+  AU: "Australia",
+  CA: "Canada",
+  DE: "Germany",
+  FR: "France",
+  NL: "Netherlands",
+  IE: "Ireland",
+};
+
+function countryFromCode(value: string | null) {
+  if (!value) return null;
+  return COUNTRY_NAMES[value.toUpperCase()] ?? value;
 }
 
 function mapsLike(value: unknown) {

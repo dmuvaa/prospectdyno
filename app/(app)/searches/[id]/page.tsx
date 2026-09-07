@@ -46,7 +46,7 @@ export default async function SearchDetailPage({
   const { data: companies } = companyIds.length
     ? await supabase
         .from("companies")
-        .select("id, name, domain, status, created_at")
+        .select("id, name, domain, city, country, industry, status, created_at")
         .in("id", companyIds)
         .order("created_at", { ascending: false })
     : { data: [] };
@@ -68,7 +68,7 @@ export default async function SearchDetailPage({
         .eq("workspace_id", workspace.id)
         .in("agent_run_id", runIds)
         .order("created_at", { ascending: false })
-        .limit(40)
+        .limit(200)
     : { data: [] };
 
   const steps = (rawSteps ?? []).map((step) => ({
@@ -84,6 +84,9 @@ export default async function SearchDetailPage({
       id: company.id,
       name: company.name,
       domain: company.domain,
+      city: company.city,
+      country: company.country,
+      industry: company.industry,
       status: opportunity?.status ?? company.status,
       score: opportunity?.opportunity_score ?? null,
       angle: opportunity?.recommended_angle ?? null,

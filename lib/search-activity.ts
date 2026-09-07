@@ -32,6 +32,12 @@ export function activityLabel(step: SearchActivityStep) {
     return typeof found === "number" ? `Found ${found} companies` : "Discovery finished";
   }
   if (step.step_type === "normalization") {
+    const savedCount = typeof step.output?.count === "number" ? step.output.count : step.input?.count;
+    if (step.tool_name === "save_companies") {
+      if (step.status === "running") return "Saving companies…";
+      if (step.status === "failed") return step.error ?? "Could not save companies";
+      return typeof savedCount === "number" ? `Saved ${savedCount} companies` : "Companies saved";
+    }
     if (step.status === "running") return name ? `Saving ${name}…` : "Saving company…";
     return name ? `Added ${name}` : "Company saved";
   }
@@ -54,10 +60,15 @@ export function activityLabel(step: SearchActivityStep) {
 }
 
 export function pipelineStages(status: string, steps: SearchActivityStep[]) {
-  const types = new Set(steps.filter((step) => step.status !== "failed").map((step) => step.step_type));
-  const current = [...steps].reverse().find((step) => step.status === "running")?.step_type
+  const types = new Set(
+    steps
+      .filter((step) => step.status !== "failed")
+      .map((step) => (step.step_type === "normalization" ? "discovery" : step.step_type)),
+  );
+  const rawCurrent = [...steps].reverse().find((step) => step.status === "running")?.step_type
     ?? [...steps].reverse().find((step) => step.status === "completed")?.step_type
     ?? null;
+  const current = rawCurrent === "normalization" ? "discovery" : rawCurrent;
 
   const items = [
     { id: "queued", label: "Queued" },

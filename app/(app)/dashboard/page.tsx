@@ -22,6 +22,7 @@ export default async function DashboardPage({
     { data: pendingIcps },
     { data: failedSearches },
     { data: activeSearches },
+    { data: recentSearches },
     { data: inbox },
     { count: opportunityCount },
     { count: prospectCount },
@@ -54,6 +55,12 @@ export default async function DashboardPage({
       .in("status", ["queued", "running"])
       .order("updated_at", { ascending: false })
       .limit(5),
+    supabase
+      .from("searches")
+      .select("id, name, status, result_count, opportunity_count, updated_at")
+      .eq("workspace_id", workspace.id)
+      .order("updated_at", { ascending: false })
+      .limit(8),
     supabase
       .from("opportunities")
       .select("id, company_id, opportunity_score, recommended_angle, why, status")
@@ -157,6 +164,37 @@ export default async function DashboardPage({
             </Card>
           ) : null}
         </div>
+      ) : null}
+
+      {(recentSearches ?? []).length > 0 ? (
+        <Card>
+          <CardHeader className="flex-row items-start justify-between space-y-0">
+            <div>
+              <CardTitle>Recent hunts</CardTitle>
+              <CardDescription>Every company from a hunt is saved before scoring starts.</CardDescription>
+            </div>
+            <Button asChild variant="ghost" size="sm">
+              <Link href="/searches">Open history</Link>
+            </Button>
+          </CardHeader>
+          <CardContent>
+            <ul className="divide-y divide-border">
+              {(recentSearches ?? []).map((search) => (
+                <li key={search.id} className="flex items-center justify-between gap-3 py-3">
+                  <div>
+                    <Link href={`/searches/${search.id}`} className="font-medium hover:underline">
+                      {search.name}
+                    </Link>
+                    <p className="text-sm text-muted-foreground">
+                      {search.result_count} companies · {search.opportunity_count} opportunities
+                    </p>
+                  </div>
+                  <StatusBadge status={search.status} />
+                </li>
+              ))}
+            </ul>
+          </CardContent>
+        </Card>
       ) : null}
 
       <Card>

@@ -22,6 +22,7 @@ import {
 } from "@prospectdyno/shared";
 import type { SupabaseClient } from "@supabase/supabase-js";
 import { looseSupabase } from "@/lib/supabase-loose";
+import { summarizeStepPayload } from "@/lib/pipeline/summarize-step";
 
 type Admin = SupabaseClient<Database>;
 type JobRow = Database["public"]["Tables"]["jobs"]["Row"] & {
@@ -173,8 +174,52 @@ export async function runSearch(
       () => loadCandidates(search.provider, input),
     );
     const limited = candidates.slice(0, input.limit ?? SEARCH_LIMIT);
-    const websiteUrls = limited
-      .map((candidate) => candidate.website ?? websiteFromDomain(candidate.domain))
+    const saved: Array<{ candidate: Candidate; companyId: string }> = [];
+
+    await withAgentStep(
+      admin,
+      workspaceId,
+      agentRunId,
+      "normalization",
+      "save_companies",
+      { count: limited.length },
+      async () => {
+        for (const candidate of limited) {
+          try {
+            const companyId = await upsertCompany(admin, workspaceId, candidate, search.provider);
+            await recordCompanyProvenance(admin, workspaceId, companyId, candidate, search.provider);
+            await admin.from("search_results").upsert(
+              {
+                workspace_id: workspaceId,
+                search_id: searchId,
+                company_id: companyId,
+                raw: (candidate.source_metadata ?? {}) as Json,
+              },
+              { onConflict: "search_id,company_id" },
+            );
+            await maybeSaveContact(admin, workspaceId, companyId, candidate);
+            saved.push({ candidate, companyId });
+            await admin
+              .from("searches")
+              .update({
+                result_count: saved.length,
+                cost: saved.length * CREDIT_COSTS.company_discovery,
+              })
+              .eq("id", searchId);
+          } catch (error) {
+            console.warn(
+              "Could not save company",
+              candidate.name,
+              error instanceof Error ? error.message : error,
+            );
+          }
+        }
+        return { count: saved.length, names: saved.map((row) => row.candidate.name) };
+      },
+    );
+
+    const websiteUrls = saved
+      .map(({ candidate }) => candidate.website ?? websiteFromDomain(candidate.domain))
       .filter((url): url is string => Boolean(url));
     const crawledSites = apifyScraperStatus().website && websiteUrls.length > 0
       ? await withAgentStep(
@@ -194,47 +239,18 @@ export async function runSearch(
       icpCriteria = (icp?.criteria ?? null) as IcpInterpretation | null;
     }
 
-    let totalCost = 0;
+    let totalCost = saved.length * CREDIT_COSTS.company_discovery;
     let opportunities = 0;
 
-    for (const [index, candidate] of limited.entries()) {
-      const companyId = await withAgentStep(
-        admin,
-        workspaceId,
-        agentRunId,
-        "normalization",
-        "upsert_company",
-        { candidate, index },
-        () => upsertCompany(admin, workspaceId, candidate, search.provider),
-      );
-
-      await recordCompanyProvenance(admin, workspaceId, companyId, candidate, search.provider);
-      await admin.from("search_results").upsert(
-        {
-          workspace_id: workspaceId,
-          search_id: searchId,
+    for (const { candidate, companyId } of saved) {
+      try {
+        await recordUsage(admin, workspaceId, "company_discovery", CREDIT_COSTS.company_discovery, {
           company_id: companyId,
-          raw: (candidate.source_metadata ?? {}) as Json,
-        },
-        { onConflict: "search_id,company_id" },
-      );
-
-      await maybeSaveContact(admin, workspaceId, companyId, candidate);
-
-      await admin
-        .from("searches")
-        .update({
-          result_count: index + 1,
-          opportunity_count: opportunities,
-          cost: totalCost,
-        })
-        .eq("id", searchId);
-
-      totalCost += CREDIT_COSTS.company_discovery;
-      await recordUsage(admin, workspaceId, "company_discovery", CREDIT_COSTS.company_discovery, {
-        company_id: companyId,
-        search_id: searchId,
-      }, `company_discovery:${searchId}:${companyId}`);
+          search_id: searchId,
+        }, `company_discovery:${searchId}:${companyId}`);
+      } catch {
+        // Metering should not stop scoring.
+      }
 
       const website = candidate.website ?? websiteFromDomain(candidate.domain);
       let audit: { summary: unknown; scores: Record<string, number>; excerpt: string } | null = null;
@@ -247,7 +263,7 @@ export async function runSearch(
             agentRunId,
             "website_analysis",
             "analyze_website",
-            { company_id: companyId, website },
+            { company_id: companyId, website, name: candidate.name },
             () => analyzeWebsite(website, crawledSiteFor(crawledSites, website)),
           );
           const { data: websiteAudit } = await admin
@@ -257,7 +273,7 @@ export async function runSearch(
               company_id: companyId,
               ...analyzed.scores,
               summary: analyzed.summary as Json,
-              details: { excerpt: analyzed.htmlExcerpt, source_url: website } as Json,
+              details: { excerpt: analyzed.htmlExcerpt.slice(0, 4000), source_url: website } as Json,
             })
             .select("id")
             .single();
@@ -279,94 +295,94 @@ export async function runSearch(
         }
       }
 
-      if (!icpCriteria) continue;
+      if (icpCriteria) {
+        await admin.from("companies").update({ status: "RESEARCHING" }).eq("id", companyId);
 
-      await admin.from("companies").update({ status: "RESEARCHING" }).eq("id", companyId);
+        try {
+          const result = await withAgentStep(
+            admin,
+            workspaceId,
+            agentRunId,
+            "qualification",
+            "qualify_company",
+            { company_id: companyId, name: candidate.name },
+            () => qualifyCompany({
+              icp: icpCriteria,
+              company: candidate,
+              audit: audit?.summary ?? null,
+              excerpt: audit?.excerpt ?? "",
+            }),
+          );
+          const report = result.data;
+          const websiteOpportunity = audit?.scores.website_score
+            ? 100 - audit.scores.website_score
+            : report.opportunity_score;
+          const scoreInputs = {
+            fit: report.fit_score,
+            intent: report.intent_score,
+            business: websiteOpportunity,
+            contactability: report.contactability_score,
+            confidence: report.confidence_score,
+          };
+          const scored = opportunityScore(scoreInputs);
 
-      try {
-        const result = await withAgentStep(
-          admin,
-          workspaceId,
-          agentRunId,
-          "qualification",
-          "qualify_company",
-          { company_id: companyId },
-          () => qualifyCompany({
-            icp: icpCriteria,
-            company: candidate,
-            audit: audit?.summary ?? null,
-            excerpt: audit?.excerpt ?? "",
-          }),
-        );
-        const report = result.data;
-        const websiteOpportunity = audit?.scores.website_score
-          ? 100 - audit.scores.website_score
-          : report.opportunity_score;
-        const scoreInputs = {
-          fit: report.fit_score,
-          intent: report.intent_score,
-          business: websiteOpportunity,
-          contactability: report.contactability_score,
-          confidence: report.confidence_score,
-        };
-        const scored = opportunityScore(scoreInputs);
+          const { data: opportunity } = await admin
+            .from("opportunities")
+            .insert({
+              workspace_id: workspaceId,
+              company_id: companyId,
+              search_id: searchId,
+              icp_id: search.icp_id,
+              fit_score: clamp(report.fit_score),
+              intent_score: clamp(report.intent_score),
+              opportunity_score: scored,
+              contactability_score: clamp(report.contactability_score),
+              confidence_score: clamp(report.confidence_score),
+              why: report.why as Json,
+              recommended_service: report.recommended_service,
+              recommended_angle: report.recommended_angle,
+              recommended_contact: report.recommended_contact,
+              report: report as Json,
+              status: scored >= 60 ? "QUALIFIED" : "NEW",
+            })
+            .select("id")
+            .single();
 
-        const { data: opportunity } = await admin
-          .from("opportunities")
-          .insert({
-            workspace_id: workspaceId,
+          if (opportunity) {
+            opportunities += 1;
+            await insertEvidence(admin, workspaceId, companyId, opportunity.id, report);
+            await recordScore(admin, workspaceId, companyId, opportunity.id, scored, scoreInputs);
+            await saveResearchReport(admin, workspaceId, companyId, opportunity.id, {
+              report,
+              provider: result.provider,
+              model: result.model,
+              usage: result.usage,
+              durationMs: result.durationMs,
+            });
+          }
+
+          await admin
+            .from("companies")
+            .update({ status: scored >= 60 ? "QUALIFIED" : "NEW" })
+            .eq("id", companyId);
+
+          totalCost += CREDIT_COSTS.qualification;
+          await recordUsage(admin, workspaceId, "qualification", CREDIT_COSTS.qualification, {
             company_id: companyId,
             search_id: searchId,
-            icp_id: search.icp_id,
-            fit_score: clamp(report.fit_score),
-            intent_score: clamp(report.intent_score),
-            opportunity_score: scored,
-            contactability_score: clamp(report.contactability_score),
-            confidence_score: clamp(report.confidence_score),
-            why: report.why as Json,
-            recommended_service: report.recommended_service,
-            recommended_angle: report.recommended_angle,
-            recommended_contact: report.recommended_contact,
-            report: report as Json,
-            status: scored >= 60 ? "QUALIFIED" : "NEW",
-          })
-          .select("id")
-          .single();
-
-        if (opportunity) {
-          opportunities += 1;
-          await insertEvidence(admin, workspaceId, companyId, opportunity.id, report);
-          await recordScore(admin, workspaceId, companyId, opportunity.id, scored, scoreInputs);
-          await saveResearchReport(admin, workspaceId, companyId, opportunity.id, {
-            report,
-            provider: result.provider,
             model: result.model,
-            usage: result.usage,
-            durationMs: result.durationMs,
-          });
+            provider: result.provider,
+            cost_usd: result.usage.costUsd,
+          }, `qualification:${searchId}:${companyId}`);
+        } catch {
+          await admin.from("companies").update({ status: "NEW" }).eq("id", companyId);
         }
-
-        await admin
-          .from("companies")
-          .update({ status: scored >= 60 ? "QUALIFIED" : "NEW" })
-          .eq("id", companyId);
-
-        totalCost += CREDIT_COSTS.qualification;
-        await recordUsage(admin, workspaceId, "qualification", CREDIT_COSTS.qualification, {
-          company_id: companyId,
-          search_id: searchId,
-          model: result.model,
-          provider: result.provider,
-          cost_usd: result.usage.costUsd,
-        }, `qualification:${searchId}:${companyId}`);
-      } catch {
-        await admin.from("companies").update({ status: "NEW" }).eq("id", companyId);
       }
 
       await admin
         .from("searches")
         .update({
-          result_count: index + 1,
+          result_count: saved.length,
           opportunity_count: opportunities,
           cost: totalCost,
         })
@@ -374,7 +390,7 @@ export async function runSearch(
     }
 
     const output = {
-      companies: limited.length,
+      companies: saved.length,
       opportunities,
       cost: totalCost,
     };
@@ -383,7 +399,7 @@ export async function runSearch(
       .from("searches")
       .update({
         status: "completed",
-        result_count: limited.length,
+        result_count: saved.length,
         opportunity_count: opportunities,
         cost: totalCost,
       })
@@ -427,6 +443,15 @@ async function upsertCompany(
       .eq("normalized_domain", domain)
       .maybeSingle();
     if (existing) return existing.id;
+  } else {
+    const { data: existing } = await admin
+      .from("companies")
+      .select("id")
+      .eq("workspace_id", workspaceId)
+      .eq("name", candidate.name)
+      .is("normalized_domain", null)
+      .maybeSingle();
+    if (existing) return existing.id;
   }
 
   const { data, error } = await admin
@@ -458,7 +483,7 @@ async function maybeSaveContact(
   companyId: string,
   candidate: Candidate,
 ) {
-  if (!candidate.email && !candidate.contact_name) return;
+  if (!candidate.email && !candidate.contact_name && !candidate.phone) return;
 
   const normalizedEmail = normalizeEmail(candidate.email);
   const payload = {
@@ -697,7 +722,7 @@ async function withAgentStep<T>(
       agent_run_id: agentRunId,
       step_type: stepType,
       tool_name: toolName,
-      input: summarizeStepOutput(input) as Json,
+      input: summarizeStepPayload(input) as Json,
       status: "running",
     })
     .select("id")
@@ -706,14 +731,29 @@ async function withAgentStep<T>(
   try {
     const output = await action();
     if (step?.id) {
-      await looseSupabase(admin)
-        .from("agent_steps")
-        .update({
-          output: summarizeStepOutput(output) as Json,
-          duration_ms: Date.now() - started,
-          status: "completed",
-        })
-        .eq("id", step.id);
+      try {
+        await looseSupabase(admin)
+          .from("agent_steps")
+          .update({
+            output: summarizeStepPayload(output) as Json,
+            duration_ms: Date.now() - started,
+            status: "completed",
+          })
+          .eq("id", step.id);
+      } catch (error) {
+        console.warn(
+          "Could not persist agent step output:",
+          error instanceof Error ? error.message : error,
+        );
+        await looseSupabase(admin)
+          .from("agent_steps")
+          .update({
+            duration_ms: Date.now() - started,
+            status: "completed",
+            output: { persisted: false } as Json,
+          })
+          .eq("id", step.id);
+      }
     }
     return output;
   } catch (caught) {
@@ -729,15 +769,6 @@ async function withAgentStep<T>(
     }
     throw caught;
   }
-}
-
-function summarizeStepOutput(output: unknown) {
-  if (Array.isArray(output)) return { count: output.length };
-  if (typeof output === "object" && output !== null) {
-    const serialized = JSON.stringify(output);
-    return JSON.parse(serialized.slice(0, 4000)) as Json;
-  }
-  return { value: output };
 }
 
 async function recordScore(

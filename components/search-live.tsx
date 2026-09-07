@@ -1,6 +1,5 @@
-import Link from "next/link";
 import { Radar } from "lucide-react";
-import { InboxActions } from "@/components/inbox-actions";
+import { SearchResultsList, type SearchCompanyRow } from "@/components/search-results-list";
 import { StatusBadge } from "@/components/status-badge";
 import { Card, CardContent, CardDescription, CardHeader, CardTitle } from "@/components/ui/card";
 import { activityLabel, pipelineStages, type SearchActivityStep } from "@/lib/search-activity";
@@ -20,15 +19,7 @@ export function SearchLivePanel({
   resultCount: number;
   opportunityCount: number;
   steps: SearchActivityStep[];
-  companies: Array<{
-    id: string;
-    name: string;
-    domain: string | null;
-    status: string;
-    score: number | null;
-    angle: string | null;
-    opportunityId: string | null;
-  }>;
+  companies: SearchCompanyRow[];
 }) {
   const stages = pipelineStages(status, steps);
   const current = steps.find((step) => step.status === "running") ?? steps[0] ?? null;
@@ -103,45 +94,12 @@ export function SearchLivePanel({
           </CardContent>
         </Card>
 
-        <div className="space-y-3">
-          <p className="text-sm text-muted-foreground">
-            {resultCount} companies · {opportunityCount} opportunities
-          </p>
-          {companies.length > 0 ? (
-            <ul className="space-y-3">
-              {companies.map((company) => (
-                <li key={company.id} className="rounded-xl border border-border bg-card p-4 shadow-sm">
-                  <div className="flex items-start justify-between gap-3">
-                    <div className="min-w-0">
-                      <Link href={`/prospects/${company.id}`} className="font-medium hover:underline">
-                        {company.name}
-                      </Link>
-                      <p className="text-sm text-muted-foreground">{company.domain}</p>
-                      {company.angle ? <p className="mt-1 text-sm">{company.angle}</p> : null}
-                    </div>
-                    <div className="text-right">
-                      {company.score != null ? (
-                        <p className="font-heading text-3xl">{Math.round(company.score)}</p>
-                      ) : (
-                        <p className="text-xs text-muted-foreground">{running ? "Working…" : "—"}</p>
-                      )}
-                      <StatusBadge status={company.status} />
-                    </div>
-                  </div>
-                  {company.opportunityId ? (
-                    <div className="mt-3">
-                      <InboxActions opportunityId={company.opportunityId} />
-                    </div>
-                  ) : null}
-                </li>
-              ))}
-            </ul>
-          ) : (
-            <div className="rounded-xl border border-dashed border-border p-8 text-center text-sm text-muted-foreground">
-              {running ? "Companies will appear here one by one as they are found." : "No companies in this search yet."}
-            </div>
-          )}
-        </div>
+        <SearchResultsList
+          companies={companies}
+          running={running}
+          opportunityCount={opportunityCount}
+          persistedCount={resultCount}
+        />
       </div>
     </div>
   );
