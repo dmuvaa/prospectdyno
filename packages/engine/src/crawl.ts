@@ -1,6 +1,6 @@
 import * as cheerio from "cheerio";
 import type { WebsiteAuditSummary, WebsiteScores } from "@prospectdyno/shared";
-import type { CrawledSite } from "./apify";
+import { crawledSiteFor, crawlWebsitePages, type CrawledSite } from "./apify";
 import { clampScore } from "./normalize";
 
 const UA =
@@ -10,29 +10,114 @@ export async function analyzeWebsite(
   url: string,
   crawled?: CrawledSite | null,
   signal?: AbortSignal,
+  options?: { skipCrawlFallback?: boolean },
 ): Promise<{
   summary: WebsiteAuditSummary;
   scores: WebsiteScores;
   htmlExcerpt: string;
   emails: string[];
 }> {
-  const fetched = await fetchWebsite(url, signal).catch(() => null);
-  if (fetched && crawled?.text) {
+  const fetched = await fetchWebsiteDeep(url, signal).catch(() => null);
+  let crawledSite = crawled ?? null;
+  if (!options?.skipCrawlFallback && isThinWebsiteAnalysis(fetched) && !crawledSite?.text) {
+    const extras = relatedPageUrls(url);
+    const crawledMap = await withCrawlSlot(() => crawlWebsitePages(extras, signal)).catch(() => new Map<string, CrawledSite>());
+    crawledSite = crawledSiteFor(crawledMap, url) ?? [...crawledMap.values()][0] ?? null;
+  }
+  if (fetched && crawledSite?.text) {
+    const crawledText = crawledSite.text.replace(/\s+/g, " ").trim();
+    const emails = uniqueEmails([...fetched.emails, ...extractEmails(crawledText, url)]);
+    const summary = {
+      ...fetched.summary,
+      title: fetched.summary.title || crawledSite.title,
+      description: fetched.summary.description || crawledSite.description,
+      word_count: Math.max(fetched.summary.word_count, crawledText.split(/\s+/).filter(Boolean).length),
+      has_form: fetched.summary.has_form || /contact|form|get in touch/i.test(crawledText),
+      has_tel: fetched.summary.has_tel || /\+?\d[\d\s().-]{7,}/.test(crawledText),
+      has_mailto: fetched.summary.has_mailto || emails.length > 0,
+    };
     return {
-      summary: {
-        ...fetched.summary,
-        title: fetched.summary.title || crawled.title,
-        description: fetched.summary.description || crawled.description,
-        word_count: Math.max(fetched.summary.word_count, crawled.text.split(/\s+/).filter(Boolean).length),
-      },
-      scores: fetched.scores,
-      htmlExcerpt: crawled.text.slice(0, 4000),
-      emails: uniqueEmails([...fetched.emails, ...extractEmails(crawled.text, url)]),
+      summary,
+      scores: scoreSummary(summary, crawledText.length),
+      htmlExcerpt: crawledText.slice(0, 4000),
+      emails,
     };
   }
-  if (crawled?.text) return fromCrawled(crawled);
+  if (crawledSite?.text) return fromCrawled(crawledSite);
   if (fetched) return fetched;
   throw new Error(`Could not fetch ${url}`);
+}
+
+export function isThinWebsiteAnalysis(
+  result: { summary: { word_count: number }; htmlExcerpt: string } | null,
+) {
+  if (!result) return true;
+  return result.summary.word_count < 120 || result.htmlExcerpt.replace(/\s+/g, " ").trim().length < 400;
+}
+
+async function fetchWebsiteDeep(url: string, signal?: AbortSignal) {
+  const home = await fetchWebsite(url, signal);
+  if (!isThinWebsiteAnalysis(home)) return home;
+
+  const extras = relatedPageUrls(url).slice(1);
+  const pages = await Promise.all(extras.map((page) => fetchWebsite(page, signal).catch(() => null)));
+  const texts = [home.htmlExcerpt, ...pages.filter(Boolean).map((page) => page!.htmlExcerpt)].filter(Boolean);
+  const emails = uniqueEmails([home.emails, ...pages.filter(Boolean).map((page) => page!.emails)].flat());
+  const wordCount = texts.join(" ").split(/\s+/).filter(Boolean).length;
+  if (wordCount <= home.summary.word_count) return home;
+
+  return {
+    summary: {
+      ...home.summary,
+      word_count: wordCount,
+      has_form: home.summary.has_form || pages.some((page) => page?.summary.has_form),
+      has_tel: home.summary.has_tel || pages.some((page) => page?.summary.has_tel) || /\+?\d[\d\s().-]{7,}/.test(texts.join(" ")),
+      has_mailto: home.summary.has_mailto || emails.length > 0,
+    },
+    scores: scoreSummary(
+      {
+        ...home.summary,
+        word_count: wordCount,
+        has_form: home.summary.has_form || pages.some((page) => page?.summary.has_form),
+        has_tel: home.summary.has_tel || pages.some((page) => page?.summary.has_tel),
+        has_mailto: home.summary.has_mailto || emails.length > 0,
+      },
+      texts.join(" ").length,
+    ),
+    htmlExcerpt: texts.join("\n\n").slice(0, 4000),
+    emails,
+  };
+}
+
+const crawlWaiters: Array<() => void> = [];
+let crawlActive = 0;
+const MAX_PARALLEL_CRAWLS = 2;
+
+async function withCrawlSlot<T>(action: () => Promise<T>): Promise<T> {
+  if (crawlActive >= MAX_PARALLEL_CRAWLS) {
+    await new Promise<void>((resolve) => crawlWaiters.push(resolve));
+  }
+  crawlActive += 1;
+  try {
+    return await action();
+  } finally {
+    crawlActive -= 1;
+    crawlWaiters.shift()?.();
+  }
+}
+
+export function relatedPageUrls(url: string) {
+  try {
+    const parsed = new URL(url.includes("://") ? url : `https://${url}`);
+    return [...new Set([
+      parsed.toString(),
+      new URL("/contact", parsed.origin).toString(),
+      new URL("/contact-us", parsed.origin).toString(),
+      new URL("/about", parsed.origin).toString(),
+    ])];
+  } catch {
+    return [url];
+  }
 }
 
 async function fetchWebsite(url: string, signal?: AbortSignal) {
@@ -108,7 +193,7 @@ function summarizeHtml(html: string, pageUrl?: string) {
     generator: $('meta[name="generator"]').attr("content") || null,
     technologies,
     has_form: $("form").length > 0,
-    has_tel: $('a[href^="tel:"]').length > 0,
+    has_tel: $('a[href^="tel:"]').length > 0 || /\+?\d[\d\s().-]{7,}/.test(text),
     has_mailto: $('a[href^="mailto:"]').length > 0 || extractEmails(html, pageUrl).length > 0,
     has_viewport: $('meta[name="viewport"]').length > 0,
     word_count: text.split(" ").filter(Boolean).length,

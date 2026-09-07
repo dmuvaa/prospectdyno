@@ -1,6 +1,7 @@
 "use client";
 
 import { useState } from "react";
+import { creditsForHunt } from "@prospectdyno/shared";
 import { startHuntAction } from "@/lib/actions/hunt";
 import { EXAMPLE_PROMPTS } from "@/lib/examples";
 import { Button } from "@/components/ui/button";
@@ -13,10 +14,12 @@ export function HuntComposer({
   icps,
   defaultPrompt = "",
   defaultIcpId = "",
+  creditBalance,
 }: {
   icps: IcpOption[];
   defaultPrompt?: string;
   defaultIcpId?: string;
+  creditBalance?: number;
 }) {
   const [prompt, setPrompt] = useState(defaultPrompt);
   const [urls, setUrls] = useState("");
@@ -101,6 +104,12 @@ export function HuntComposer({
       </div>
 
       {error ? <p className="text-sm text-destructive">{error}</p> : null}
+
+      <p className="text-sm text-muted-foreground">
+        A hunt of 25 companies uses about {creditsForHunt(25)} credits
+        {creditBalance != null ? ` · ${creditBalance} remaining` : ""}.
+        Running out no longer stops the hunt.
+      </p>
 
       <Button type="submit" variant="ink" size="lg" disabled={pending}>
         {pending ? "Starting hunt…" : "Find companies"}

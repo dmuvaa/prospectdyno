@@ -13,13 +13,31 @@ export type SearchStatus = (typeof SEARCH_STATUSES)[number];
 
 export const CREDIT_COSTS = {
   company_discovery: 1,
-  website_analysis: 3,
-  qualification: 5,
-  personalization: 2,
+  website_analysis: 1,
+  qualification: 1,
+  personalization: 1,
   export: 1,
   interpret_icp: 1,
   plan_search: 1,
 } as const;
+
+export const CREDIT_COST_COPY: Record<keyof typeof CREDIT_COSTS, string> = {
+  company_discovery: "Saving a found company",
+  website_analysis: "Reading a company website",
+  qualification: "Scoring a company against your brief",
+  personalization: "Drafting a message",
+  export: "Exporting a CSV",
+  interpret_icp: "Turning a prompt into a brief",
+  plan_search: "Planning the hunt queries",
+};
+
+export function creditsForHunt(companyCount = 25) {
+  return (
+    CREDIT_COSTS.interpret_icp +
+    CREDIT_COSTS.plan_search +
+    companyCount * (CREDIT_COSTS.company_discovery + CREDIT_COSTS.website_analysis + CREDIT_COSTS.qualification)
+  );
+}
 
 export type Candidate = {
   name: string;

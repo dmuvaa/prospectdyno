@@ -1,3 +1,5 @@
+import Link from "next/link";
+import { creditsForHunt } from "@prospectdyno/shared";
 import { resolvedOpenAiModel } from "@prospectdyno/ai";
 import { apifyScraperStatus } from "@prospectdyno/engine";
 import { requireWorkspace } from "@/lib/workspace";
@@ -10,6 +12,7 @@ import { Card, CardContent, CardDescription, CardHeader, CardTitle } from "@/com
 import { Input } from "@/components/ui/input";
 import { PageHeader } from "@/components/page-header";
 import { StatusBadge } from "@/components/status-badge";
+import { usageEventLabel } from "@/lib/credit-copy";
 import { formatDate } from "@/lib/format";
 import { looseSupabase } from "@/lib/supabase-loose";
 import type { ApiKeyListItem } from "@/components/api-key-manager";
@@ -81,7 +84,11 @@ export default async function SettingsPage() {
         <CardHeader>
           <CardTitle>Workspace</CardTitle>
           <CardDescription>
-            Signed in as {user.email}. Role: {role}. Credits: {workspace.credit_balance}.
+            Signed in as {user.email}. Role: {role}.{" "}
+            <Link href="/usage" className="hover:underline">
+              {workspace.credit_balance} credits
+            </Link>
+            . A 25-company hunt uses about {creditsForHunt(25)}.
           </CardDescription>
         </CardHeader>
         <CardContent className="space-y-4">
@@ -207,14 +214,19 @@ export default async function SettingsPage() {
       <Card id="usage">
         <CardHeader>
           <CardTitle>Recent usage</CardTitle>
-          <CardDescription>Credit events for this workspace.</CardDescription>
+          <CardDescription>
+            Credit events for this workspace.{" "}
+            <Link href="/usage" className="text-teal-800 hover:underline">
+              Open the full credits page
+            </Link>
+          </CardDescription>
         </CardHeader>
         <CardContent>
           {(usage ?? []).length > 0 ? (
             <ul className="divide-y divide-border">
               {(usage ?? []).map((row, index) => (
                 <li key={`${row.created_at}-${index}`} className="flex items-center justify-between py-2 text-sm">
-                  <span>{row.event_type.replaceAll("_", " ")}</span>
+                  <span>{usageEventLabel(row.event_type)}</span>
                   <span className="text-muted-foreground">
                     {row.credits} credits · {formatDate(row.created_at)}
                   </span>

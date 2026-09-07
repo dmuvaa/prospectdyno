@@ -52,7 +52,8 @@ Rules:
 - Scores are integers 0-100.
 - Distinguish verified facts from inferences. Put uncertain claims at low confidence.
 - Every important claim needs evidence and a source (page type or URL if known).
-- If the website excerpt is thin, lower confidence rather than inventing services.
+- If the website excerpt is thin or looks like a JavaScript shell ("Initializing", almost no copy), do not conclude the real site lacks content, contact details, or pages. Lower confidence and say the rendered site was not captured.
+- Only cite reviews that appear in source_metadata.reviews. Never invent ratings or quotes.
 - If source_metadata.reviews are present, use them as evidence for reputation and buying signals.
 - recommended_contact is a title, not a fabricated person.`,
     user: JSON.stringify(qualifyModelInput(input)),

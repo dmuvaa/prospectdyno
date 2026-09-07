@@ -22,6 +22,11 @@ describe("activityLabel", () => {
       tool_name: "save_companies",
       output: { count: 25 },
     }))).toBe("Saved 25 companies");
+    expect(activityLabel(step({
+      step_type: "normalization",
+      tool_name: "save_serp_companies",
+      status: "running",
+    }))).toBe("Saving companies from web search…");
   });
 
   it("uses the stop message when a hunt is cancelled", () => {

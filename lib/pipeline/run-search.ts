@@ -1,12 +1,17 @@
 import { qualifyCompany } from "@prospectdyno/ai";
 import {
   analyzeWebsite,
+  crawledSiteFor,
+  crawlWebsitePages,
   enrichApifyContacts,
   fetchApifyCandidates,
+  fetchApifySerpCandidates,
+  isThinWebsiteAnalysis,
   normalizeDomain,
   opportunityScore,
   parseCsv,
   parseUrlList,
+  relatedPageUrls,
   websiteFromDomain,
 } from "@prospectdyno/engine";
 import { createAdminClient } from "@prospectdyno/supabase/admin";
@@ -203,69 +208,105 @@ export async function runSearch(
 
   try {
     const input = (search.input ?? {}) as SearchInput;
+    const provider = search.provider;
+    const serpPromise = provider === "apify"
+      ? fetchApifySerpCandidates({
+          queries: input.queries ?? [],
+          locations: input.locations ?? [],
+          limit: input.limit ?? SEARCH_LIMIT,
+          signal: abort.signal,
+        }).catch((error) => {
+          console.warn("SERP discovery failed:", error instanceof Error ? error.message : error);
+          return [];
+        })
+      : Promise.resolve([]);
     const candidates = await withAgentStep(
       admin,
       workspaceId,
       agentRunId,
       "discovery",
-      search.provider,
+      provider,
       { input },
-      () => loadCandidates(search.provider, input, abort.signal),
+      () => loadCandidates(provider, input, abort.signal),
     );
     await assertNotCancelled(admin, searchId, jobId, abort.signal);
 
     const limited = dedupeCandidates(candidates).slice(0, input.limit ?? SEARCH_LIMIT);
     const saved: Array<{ candidate: Candidate; companyId: string }> = [];
 
-    await withAgentStep(
-      admin,
-      workspaceId,
-      agentRunId,
-      "normalization",
-      "save_companies",
-      { count: limited.length },
-      async () => {
-        for (const candidate of limited) {
-          await assertNotCancelled(admin, searchId, jobId, abort.signal);
-          try {
-            const companyId = await upsertCompany(admin, workspaceId, candidate, search.provider);
-            await recordCompanyProvenance(admin, workspaceId, companyId, candidate, search.provider);
-            await admin.from("search_results").upsert(
-              {
-                workspace_id: workspaceId,
-                search_id: searchId,
-                company_id: companyId,
-                raw: (candidate.source_metadata ?? {}) as Json,
-              },
-              { onConflict: "search_id,company_id" },
-            );
-            await saveCandidateContacts(admin, workspaceId, companyId, candidate);
-            if (!saved.some((row) => row.companyId === companyId)) {
-              saved.push({ candidate, companyId });
-            } else {
-              const existing = saved.find((row) => row.companyId === companyId);
-              if (existing) existing.candidate = mergeSavedCandidate(existing.candidate, candidate);
+    async function persistCandidates(batch: Candidate[], actor: string) {
+      if (batch.length === 0) return;
+      await withAgentStep(
+        admin,
+        workspaceId,
+        agentRunId,
+        "normalization",
+        actor,
+        { count: batch.length },
+        async () => {
+          for (const candidate of batch) {
+            await assertNotCancelled(admin, searchId, jobId, abort.signal);
+            try {
+              const companyId = await upsertCompany(admin, workspaceId, candidate, provider);
+              await recordCompanyProvenance(admin, workspaceId, companyId, candidate, provider);
+              await admin.from("search_results").upsert(
+                {
+                  workspace_id: workspaceId,
+                  search_id: searchId,
+                  company_id: companyId,
+                  raw: (candidate.source_metadata ?? {}) as Json,
+                },
+                { onConflict: "search_id,company_id" },
+              );
+              await saveCandidateContacts(admin, workspaceId, companyId, candidate);
+              if (!saved.some((row) => row.companyId === companyId)) {
+                saved.push({ candidate, companyId });
+              } else {
+                const existing = saved.find((row) => row.companyId === companyId);
+                if (existing) existing.candidate = mergeSavedCandidate(existing.candidate, candidate);
+              }
+              await admin
+                .from("searches")
+                .update({
+                  result_count: saved.length,
+                  cost: saved.length * CREDIT_COSTS.company_discovery,
+                })
+                .eq("id", searchId);
+            } catch (saveError) {
+              console.warn(
+                "Could not save company",
+                candidate.name,
+                saveError instanceof Error ? saveError.message : saveError,
+              );
             }
-            await admin
-              .from("searches")
-              .update({
-                result_count: saved.length,
-                cost: saved.length * CREDIT_COSTS.company_discovery,
-              })
-              .eq("id", searchId);
-          } catch (saveError) {
-            console.warn(
-              "Could not save company",
-              candidate.name,
-              saveError instanceof Error ? saveError.message : saveError,
-            );
           }
-        }
-        return { count: saved.length, names: saved.map((row) => row.candidate.name) };
-      },
+          return { count: saved.length, names: saved.map((row) => row.candidate.name) };
+        },
+      );
+    }
+
+    function alreadyHave(candidate: Candidate) {
+      const domain = normalizeDomain(candidate.domain ?? candidate.website);
+      return saved.some((row) => {
+        const existing = normalizeDomain(row.candidate.domain ?? row.candidate.website);
+        if (domain && existing && domain === existing) return true;
+        return row.candidate.name.toLowerCase() === candidate.name.toLowerCase()
+          && (row.candidate.city ?? "").toLowerCase() === (candidate.city ?? "").toLowerCase();
+      });
+    }
+
+    await persistCandidates(limited, "save_companies");
+
+    const serpCandidates = await serpPromise;
+    await assertNotCancelled(admin, searchId, jobId, abort.signal);
+    await persistCandidates(
+      dedupeCandidates(serpCandidates)
+        .filter((candidate) => !alreadyHave(candidate))
+        .slice(0, input.limit ?? SEARCH_LIMIT),
+      "save_serp_companies",
     );
 
-    const contactEnrichment = search.provider === "apify"
+    const contactEnrichment = provider === "apify"
       ? enrichApifyContacts(saved.map((row) => row.candidate), abort.signal)
           .then(async (enriched) => {
             for (const row of saved) {
@@ -293,6 +334,7 @@ export async function runSearch(
 
     let totalCost = saved.length * CREDIT_COSTS.company_discovery;
     let opportunities = 0;
+    const analyses = new Map<string, Awaited<ReturnType<typeof analyzeWebsite>>>();
 
     await mapPool(saved, SCORE_CONCURRENCY, async ({ candidate, companyId }) => {
       await assertNotCancelled(admin, searchId, jobId, abort.signal);
@@ -306,19 +348,75 @@ export async function runSearch(
       }
 
       const website = candidate.website ?? websiteFromDomain(candidate.domain);
+      if (!website) return;
+      try {
+        const analyzed = await withAgentStep(
+          admin,
+          workspaceId,
+          agentRunId,
+          "website_analysis",
+          "analyze_website",
+          { company_id: companyId, website, name: candidate.name },
+          () => analyzeWebsite(website, null, abort.signal, { skipCrawlFallback: true }),
+        );
+        analyses.set(companyId, analyzed);
+      } catch (analyzeError) {
+        if (analyzeError instanceof SearchCancelledError) throw analyzeError;
+      }
+    });
+
+    const thinRows = saved.filter((row) => {
+      const website = row.candidate.website ?? websiteFromDomain(row.candidate.domain);
+      return Boolean(website) && isThinWebsiteAnalysis(analyses.get(row.companyId) ?? null);
+    });
+    if (thinRows.length > 0) {
+      await withAgentStep(
+        admin,
+        workspaceId,
+        agentRunId,
+        "website_analysis",
+        "crawl_websites",
+        { count: thinRows.length, names: thinRows.map((row) => row.candidate.name) },
+        async () => {
+          const urls = [
+            ...thinRows.flatMap((row) => {
+              const website = row.candidate.website ?? websiteFromDomain(row.candidate.domain);
+              return website ? [website] : [];
+            }),
+            ...thinRows.flatMap((row) => {
+              const website = row.candidate.website ?? websiteFromDomain(row.candidate.domain);
+              return website ? relatedPageUrls(website).slice(1) : [];
+            }),
+          ];
+          const crawled = await crawlWebsitePages(urls, abort.signal);
+          for (const row of thinRows) {
+            await assertNotCancelled(admin, searchId, jobId, abort.signal);
+            const website = row.candidate.website ?? websiteFromDomain(row.candidate.domain);
+            if (!website) continue;
+            const site = crawledSiteFor(crawled, website) ?? [...crawled.values()].find((item) => {
+              const domain = normalizeDomain(website);
+              return Boolean(domain && item.domain === domain);
+            });
+            if (!site?.text) continue;
+            try {
+              analyses.set(row.companyId, await analyzeWebsite(website, site, abort.signal, { skipCrawlFallback: true }));
+            } catch (analyzeError) {
+              if (analyzeError instanceof SearchCancelledError) throw analyzeError;
+            }
+          }
+          return { crawled: crawled.size, recovered: thinRows.filter((row) => !isThinWebsiteAnalysis(analyses.get(row.companyId) ?? null)).length };
+        },
+      );
+    }
+
+    await mapPool(saved, SCORE_CONCURRENCY, async ({ candidate, companyId }) => {
+      await assertNotCancelled(admin, searchId, jobId, abort.signal);
+      const website = candidate.website ?? websiteFromDomain(candidate.domain);
+      const analyzed = analyses.get(companyId);
       let audit: { summary: unknown; scores: Record<string, number>; excerpt: string } | null = null;
 
-      if (website) {
+      if (analyzed && website) {
         try {
-          const analyzed = await withAgentStep(
-            admin,
-            workspaceId,
-            agentRunId,
-            "website_analysis",
-            "analyze_website",
-            { company_id: companyId, website, name: candidate.name },
-            () => analyzeWebsite(website, null, abort.signal),
-          );
           const { data: websiteAudit } = await admin
             .from("website_audits")
             .insert({
@@ -355,7 +453,11 @@ export async function runSearch(
           }, `website_analysis:${searchId}:${companyId}`);
         } catch (analyzeError) {
           if (analyzeError instanceof SearchCancelledError) throw analyzeError;
-          audit = null;
+          audit = {
+            summary: analyzed.summary,
+            scores: analyzed.scores,
+            excerpt: analyzed.htmlExcerpt,
+          };
         }
       }
 
@@ -887,6 +989,7 @@ async function recordUsage(
   metadata: Record<string, unknown>,
   idempotencyKey: string,
 ) {
+  if (credits <= 0) return;
   const { error } = await looseSupabase(admin).rpc("consume_workspace_credits", {
     _workspace_id: workspaceId,
     _credits: credits,
@@ -898,7 +1001,9 @@ async function recordUsage(
     _metadata: metadata as Json,
   });
 
-  if (error) throw new Error(error.message);
+  if (error) {
+    console.warn("Could not meter usage:", error.message);
+  }
 }
 
 async function startAgentRun(

@@ -93,7 +93,10 @@ export default async function DashboardPage({
           </p>
         </div>
         <p className="text-sm text-muted-foreground">
-          {prospectCount ?? 0} companies · {opportunityCount ?? 0} opportunities · {workspace.credit_balance} credits
+          {prospectCount ?? 0} companies · {opportunityCount ?? 0} opportunities ·{" "}
+          <Link href="/usage" className="hover:underline">
+            {workspace.credit_balance} credits
+          </Link>
         </p>
       </div>
 
@@ -105,7 +108,12 @@ export default async function DashboardPage({
           </CardDescription>
         </CardHeader>
         <CardContent>
-          <HuntComposer icps={icps ?? []} defaultPrompt={q ?? ""} defaultIcpId={icpId ?? ""} />
+          <HuntComposer
+            icps={icps ?? []}
+            defaultPrompt={q ?? ""}
+            defaultIcpId={icpId ?? ""}
+            creditBalance={workspace.credit_balance}
+          />
         </CardContent>
       </Card>
 

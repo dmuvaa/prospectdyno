@@ -36,8 +36,12 @@ export function activityLabel(step: SearchActivityStep) {
   }
   if (step.step_type === "normalization") {
     const savedCount = typeof step.output?.count === "number" ? step.output.count : step.input?.count;
-    if (step.tool_name === "save_companies") {
-      if (step.status === "running") return "Saving companies…";
+    if (step.tool_name === "save_companies" || step.tool_name === "save_serp_companies") {
+      if (step.status === "running") {
+        return step.tool_name === "save_serp_companies"
+          ? "Saving companies from web search…"
+          : "Saving companies…";
+      }
       if (step.status === "failed") return step.error ?? "Could not save companies";
       return typeof savedCount === "number" ? `Saved ${savedCount} companies` : "Companies saved";
     }

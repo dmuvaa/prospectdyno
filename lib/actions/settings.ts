@@ -72,3 +72,28 @@ export async function updateWorkspaceProfileAction(formData: FormData) {
   revalidatePath("/dashboard");
   return { ok: true };
 }
+
+export async function addWorkspaceCreditsAction(amount = 2000) {
+  const { supabase, workspace, role, user } = await requireWorkspace();
+  if (role !== "owner" && role !== "admin") {
+    return { error: "Only owners and admins can add credits." };
+  }
+  const next = Math.max(0, workspace.credit_balance) + Math.max(1, Math.min(amount, 10_000));
+  const { error } = await supabase
+    .from("workspaces")
+    .update({ credit_balance: next })
+    .eq("id", workspace.id);
+  if (error) return { error: error.message };
+  await recordAudit(supabase, {
+    workspaceId: workspace.id,
+    userId: user.id,
+    action: "credits.added",
+    entityType: "workspace",
+    entityId: workspace.id,
+    metadata: { amount, balance: next },
+  });
+  revalidatePath("/usage");
+  revalidatePath("/settings");
+  revalidatePath("/dashboard");
+  return { ok: true, balance: next };
+}

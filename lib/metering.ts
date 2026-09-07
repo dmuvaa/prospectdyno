@@ -36,6 +36,11 @@ export async function consumeCredits(
   });
 
   if (error) {
+    if (/insufficient credits/i.test(error.message)) {
+      console.warn("Workspace is out of credits; continuing the work.");
+      return { skipped: true };
+    }
     throw new Error(error.message);
   }
+  return { skipped: false };
 }

@@ -136,12 +136,12 @@ export function buildSerpInput(input: { queries: string[]; locations: string[]; 
 }
 
 export function buildWebsiteCrawlerInput(urls: string[]) {
-  const startUrls = [...new Set(urls.map((url) => url.trim()).filter(Boolean))].slice(0, 25).map((url) => ({ url }));
+  const startUrls = [...new Set(urls.map((url) => url.trim()).filter(Boolean))].slice(0, 50).map((url) => ({ url }));
   return {
     startUrls,
     crawlerType: "playwright:adaptive",
     maxCrawlDepth: 1,
-    maxCrawlPages: Math.min(startUrls.length * 2, 40),
+    maxCrawlPages: Math.min(Math.max(startUrls.length * 3, 6), 80),
     maxRequestRetries: 1,
     includeUrlGlobs: [],
     excludeUrlGlobs: ["/**/*.pdf", "/**/login*", "/**/cart*", "/**/checkout*"],
@@ -290,6 +290,22 @@ export async function fetchApifyCandidates(input: {
   return candidates.slice(0, limit);
 }
 
+export async function fetchApifySerpCandidates(input: {
+  queries: string[];
+  locations: string[];
+  limit?: number;
+  signal?: AbortSignal;
+}): Promise<Candidate[]> {
+  const token = apifyToken();
+  const serpActor = getSerpActorId();
+  if (!token || !serpActor) return [];
+  const queries = input.queries.map((query) => query.trim()).filter(Boolean);
+  if (queries.length === 0) return [];
+
+  const items = await runSerpDiscovery(token, serpActor, queries, input.locations, input.limit ?? 25, input.signal);
+  return serpItemsToCandidates(items).slice(0, input.limit ?? 25);
+}
+
 export async function enrichApifyContacts(candidates: Candidate[], signal?: AbortSignal): Promise<Candidate[]> {
   const token = apifyToken();
   const contactActor = getContactActorId();
@@ -368,14 +384,14 @@ async function runSerpDiscovery(
   return runActor(token, actorId, buildSerpInput({ queries, locations, limit }), 180_000, signal);
 }
 
-export async function crawlWebsitePages(urls: string[]): Promise<Map<string, CrawledSite>> {
+export async function crawlWebsitePages(urls: string[], signal?: AbortSignal): Promise<Map<string, CrawledSite>> {
   const token = apifyToken();
   const actorId = getWebsiteCrawlerActorId();
   const unique = [...new Set(urls.map((url) => url.trim()).filter(Boolean))];
   const byKey = new Map<string, CrawledSite>();
   if (!token || !actorId || unique.length === 0) return byKey;
 
-  const items = await runActor(token, actorId, buildWebsiteCrawlerInput(unique), 300_000);
+  const items = await runActor(token, actorId, buildWebsiteCrawlerInput(unique), 240_000, signal);
   for (const item of items) {
     const url = firstText(item.url, item.loadedUrl, item.canonicalUrl);
     if (!url) continue;

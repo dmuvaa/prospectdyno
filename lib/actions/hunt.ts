@@ -80,16 +80,20 @@ export async function startHuntAction(input: {
       created_by: user.id,
     });
 
-    await consumeCredits(supabase, {
-      workspaceId: workspace.id,
-      userId: user.id,
-      eventType: "interpret_icp",
-      credits: CREDIT_COSTS.interpret_icp,
-      unitCost: interpreted.usage.costUsd,
-      totalCost: interpreted.usage.costUsd,
-      metadata: { icp_id: icp.id, model: interpreted.model, provider: interpreted.provider },
-      idempotencyKey: `interpret_icp:${icp.id}`,
-    });
+    try {
+      await consumeCredits(supabase, {
+        workspaceId: workspace.id,
+        userId: user.id,
+        eventType: "interpret_icp",
+        credits: CREDIT_COSTS.interpret_icp,
+        unitCost: interpreted.usage.costUsd,
+        totalCost: interpreted.usage.costUsd,
+        metadata: { icp_id: icp.id, model: interpreted.model, provider: interpreted.provider },
+        idempotencyKey: `interpret_icp:${icp.id}`,
+      });
+    } catch (error) {
+      console.warn("Could not meter interpret_icp:", error instanceof Error ? error.message : error);
+    }
 
     icpId = icp.id;
     icpName = icp.name;
@@ -106,15 +110,19 @@ export async function startHuntAction(input: {
     try {
       const planned = await planSearch(originalPrompt, criteria);
       plan = planned.data;
-      await consumeCredits(supabase, {
-        workspaceId: workspace.id,
-        userId: user.id,
-        eventType: "plan_search",
-        credits: CREDIT_COSTS.plan_search,
-        totalCost: planned.usage.costUsd,
-        metadata: { icp_id: icpId, model: planned.model, provider: planned.provider },
-        idempotencyKey: idempotencyKey("plan_search", { workspaceId: workspace.id, icpId, criteria }),
-      });
+      try {
+        await consumeCredits(supabase, {
+          workspaceId: workspace.id,
+          userId: user.id,
+          eventType: "plan_search",
+          credits: CREDIT_COSTS.plan_search,
+          totalCost: planned.usage.costUsd,
+          metadata: { icp_id: icpId, model: planned.model, provider: planned.provider },
+          idempotencyKey: idempotencyKey("plan_search", { workspaceId: workspace.id, icpId, criteria }),
+        });
+      } catch (error) {
+        console.warn("Could not meter plan_search:", error instanceof Error ? error.message : error);
+      }
     } catch (error) {
       return { error: error instanceof Error ? error.message : "Could not plan the hunt." };
     }

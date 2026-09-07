@@ -39,6 +39,7 @@ const groups = [
       { href: "/icps", label: "Briefs", icon: ListFilter },
       { href: "/lists", label: "Lists", icon: ListTodo },
       { href: "/campaigns", label: "Campaigns", icon: Megaphone },
+      { href: "/usage", label: "Credits", icon: Sparkles },
       { href: "/settings", label: "Settings", icon: Settings },
     ],
   },
@@ -153,7 +154,9 @@ export function AppNav({
             <div>
               <p className="truncate text-sm font-medium">{workspace.name}</p>
               <p className="truncate text-xs text-white/55">{email}</p>
-              <p className="mt-1 text-xs text-teal-200/80">{workspace.credit_balance} credits</p>
+              <Link href="/usage" className="mt-1 block text-xs text-teal-200/80 hover:underline">
+                {workspace.credit_balance} credits
+              </Link>
             </div>
             <form action={signOut}>
               <Button

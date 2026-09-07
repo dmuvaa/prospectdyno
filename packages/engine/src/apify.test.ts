@@ -132,7 +132,7 @@ describe("buildWebsiteCrawlerInput", () => {
       "https://other.com",
     ]);
     expect(input.startUrls).toEqual([{ url: "https://example.com" }, { url: "https://other.com" }]);
-    expect(input.maxCrawlPages).toBe(4);
+    expect(input.maxCrawlPages).toBe(6);
   });
 });
 
