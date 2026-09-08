@@ -40,3 +40,14 @@ function isPlausibleEmail(email: string) {
 function uniqueEmails(values: string[]) {
   return [...new Set(values.filter(Boolean))];
 }
+
+export function mergeEmailMetadata(
+  target?: Record<string, unknown> | null,
+  incoming?: Record<string, unknown> | null,
+): Record<string, unknown> {
+  return {
+    ...(target ?? {}),
+    ...(incoming ?? {}),
+    emails: emailsFromUnknown([target, incoming]),
+  };
+}

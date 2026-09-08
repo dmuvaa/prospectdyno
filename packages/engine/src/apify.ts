@@ -1,5 +1,5 @@
 import type { Candidate } from "@prospectdyno/shared";
-import { emailsFromUnknown } from "./emails";
+import { emailsFromUnknown, mergeEmailMetadata } from "./emails";
 import { normalizeDomain, websiteFromDomain } from "./normalize";
 
 type ApifyItem = Record<string, unknown>;
@@ -99,7 +99,7 @@ export function buildGoogleMapsInput(input: {
     website: "allPlaces",
     skipClosedPlaces: true,
     scrapePlaceDetailPage: false,
-    scrapeContacts: Boolean(input.scrapeContacts),
+    scrapeContacts: input.scrapeContacts !== false,
     includeWebResults: false,
     searchMatching: "all",
     placeMinimumStars: "",
@@ -194,6 +194,7 @@ export async function fetchApifyCandidates(input: {
   enrichContacts?: boolean;
   includeReviews?: boolean;
   includeSerp?: boolean;
+  scrapeContacts?: boolean;
   signal?: AbortSignal;
 }): Promise<Candidate[]> {
   const token = apifyToken();
@@ -239,7 +240,7 @@ export async function fetchApifyCandidates(input: {
           queries,
           locations,
           limit,
-          Boolean(contactActor && discoveryActor === contactActor),
+          input.scrapeContacts !== false,
           input.signal,
         )
       : Promise.resolve([] as ApifyItem[]),
@@ -392,7 +393,7 @@ export async function crawlWebsitePages(urls: string[], signal?: AbortSignal): P
   const byKey = new Map<string, CrawledSite>();
   if (!token || !actorId || unique.length === 0) return byKey;
 
-  const items = await runActor(token, actorId, buildWebsiteCrawlerInput(unique), 90_000, signal);
+  const items = await runActor(token, actorId, buildWebsiteCrawlerInput(unique), 600_000, signal, { abortRemote: false });
   for (const item of items) {
     const url = firstText(item.url, item.loadedUrl, item.canonicalUrl);
     if (!url) continue;
@@ -426,16 +427,18 @@ async function runActor(
   actorInput: Record<string, unknown>,
   timeoutMs = 180_000,
   signal?: AbortSignal,
+  options?: { abortRemote?: boolean },
 ) {
-  if (signal?.aborted) throw new Error("Stopped.");
+  if (signal?.aborted && options?.abortRemote !== false) throw new Error("Stopped.");
   const encoded = encodeActorId(actorId);
+  const abortRemoteEnabled = options?.abortRemote !== false;
   const startResponse = await fetch(
     `https://api.apify.com/v2/acts/${encoded}/runs?token=${encodeURIComponent(token)}`,
     {
       method: "POST",
       headers: { "content-type": "application/json" },
       body: JSON.stringify(actorInput),
-      signal,
+      signal: abortRemoteEnabled ? signal : undefined,
     },
   );
 
@@ -451,12 +454,13 @@ async function runActor(
   if (!runId) throw new Error(`Apify did not return a run id for ${actorId}.`);
 
   const abortRemote = () => {
+    if (!abortRemoteEnabled) return;
     void fetch(
       `https://api.apify.com/v2/actor-runs/${runId}/abort?token=${encodeURIComponent(token)}`,
       { method: "POST" },
     ).catch(() => undefined);
   };
-  signal?.addEventListener("abort", abortRemote, { once: true });
+  if (abortRemoteEnabled) signal?.addEventListener("abort", abortRemote, { once: true });
 
   let status = started.data?.status ?? "RUNNING";
   let datasetId = started.data?.defaultDatasetId;
@@ -464,9 +468,13 @@ async function runActor(
 
   try {
     while (!["SUCCEEDED", "FAILED", "ABORTED", "TIMED-OUT"].includes(status)) {
-      if (signal?.aborted) throw new Error("Stopped.");
+      if (signal?.aborted) {
+        if (abortRemoteEnabled) throw new Error("Stopped.");
+        const partial = datasetId ? await readDatasetItems(token, datasetId).catch(() => []) : [];
+        return partial;
+      }
       if (Date.now() > deadline) {
-        abortRemote();
+        if (abortRemoteEnabled) abortRemote();
         const partial = datasetId ? await readDatasetItems(token, datasetId).catch(() => []) : [];
         if (partial.length > 0) return partial;
         throw new Error(`Apify run timed out for ${actorId}.`);
@@ -474,7 +482,7 @@ async function runActor(
       await sleep(2000);
       const poll = await fetch(
         `https://api.apify.com/v2/actor-runs/${runId}?token=${encodeURIComponent(token)}`,
-        { signal },
+        { signal: abortRemoteEnabled ? signal : undefined },
       );
       if (!poll.ok) throw new Error(`Could not poll Apify run for ${actorId}.`);
       const body = (await poll.json()) as { data?: { status?: string; defaultDatasetId?: string } };
@@ -482,10 +490,10 @@ async function runActor(
       datasetId = body.data?.defaultDatasetId ?? datasetId;
     }
   } finally {
-    signal?.removeEventListener("abort", abortRemote);
+    if (abortRemoteEnabled) signal?.removeEventListener("abort", abortRemote);
   }
 
-  if (status === "ABORTED" && signal?.aborted) throw new Error("Stopped.");
+  if (status === "ABORTED" && signal?.aborted && abortRemoteEnabled) throw new Error("Stopped.");
   if (status !== "SUCCEEDED") {
     const partial = datasetId ? await readDatasetItems(token, datasetId).catch(() => []) : [];
     if (partial.length > 0) return partial;
@@ -642,7 +650,7 @@ function mergeCandidate(target: Candidate, incoming: Candidate) {
   target.city ||= incoming.city;
   target.industry ||= incoming.industry;
   target.description ||= incoming.description;
-  target.source_metadata = { ...(incoming.source_metadata ?? {}), ...(target.source_metadata ?? {}) };
+  target.source_metadata = mergeEmailMetadata(target.source_metadata, incoming.source_metadata);
 }
 
 function attachReviews(candidates: Candidate[], items: ApifyItem[]) {

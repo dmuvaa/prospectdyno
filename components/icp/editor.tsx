@@ -80,7 +80,7 @@ export function IcpEditor({
       <div className="flex flex-wrap items-start justify-between gap-4">
         <div>
           <p className="text-sm font-medium text-teal-800">Review interpretation</p>
-          <h1 className="font-heading mt-1 text-4xl">I interpreted your ICP this way. Is this correct?</h1>
+          <h1 className="font-heading mt-1 text-4xl">Draft brief from your website. Confirm or edit.</h1>
         </div>
         <Badge variant={status === "approved" ? "success" : "warning"}>
           {status.replace("_", " ")}
@@ -89,10 +89,10 @@ export function IcpEditor({
 
       <Card>
         <CardHeader>
-          <CardTitle>Original description</CardTitle>
+          <CardTitle>Source</CardTitle>
         </CardHeader>
         <CardContent>
-          <p className="text-sm leading-relaxed">{originalPrompt}</p>
+          <p className="whitespace-pre-wrap text-sm leading-relaxed">{originalPrompt}</p>
         </CardContent>
       </Card>
 

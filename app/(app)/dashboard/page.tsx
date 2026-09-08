@@ -7,6 +7,7 @@ import { StopHuntButton } from "@/components/stop-hunt";
 import { StatusBadge } from "@/components/status-badge";
 import { Card, CardContent, CardDescription, CardHeader, CardTitle } from "@/components/ui/card";
 import { Button } from "@/components/ui/button";
+import { emailsFromCompanySources } from "@/lib/contact-emails";
 import { INBOX_PROSPECT_STATUSES } from "@prospectdyno/shared";
 import { requireWorkspace } from "@/lib/workspace";
 
@@ -74,10 +75,21 @@ export default async function DashboardPage({
   ]);
 
   const companyIds = [...new Set((inbox ?? []).map((row) => row.company_id))];
-  const { data: companies } = companyIds.length
-    ? await supabase.from("companies").select("id, name, domain").in("id", companyIds)
-    : { data: [] };
+  const [{ data: companies }, { data: contacts }] = await Promise.all([
+    companyIds.length
+      ? supabase.from("companies").select("id, name, domain, source_metadata").in("id", companyIds)
+      : Promise.resolve({ data: [] as Array<{ id: string; name: string; domain: string | null; source_metadata: unknown }> }),
+    companyIds.length
+      ? supabase.from("contacts").select("company_id, email").eq("workspace_id", workspace.id).in("company_id", companyIds)
+      : Promise.resolve({ data: [] as Array<{ company_id: string; email: string | null }> }),
+  ]);
   const companyName = new Map((companies ?? []).map((row) => [row.id, row]));
+  const contactsByCompany = new Map<string, Array<{ email?: string | null }>>();
+  for (const contact of contacts ?? []) {
+    const current = contactsByCompany.get(contact.company_id) ?? [];
+    current.push(contact);
+    contactsByCompany.set(contact.company_id, current);
+  }
   const polling = (activeSearches ?? []).length > 0;
   const hasAttention = (failedSearches ?? []).length > 0 || (pendingIcps ?? []).length > 0;
 
@@ -89,7 +101,7 @@ export default async function DashboardPage({
           <p className="text-sm font-medium text-teal-800">Run</p>
           <h1 className="font-heading mt-1 text-4xl">{workspace.name}</h1>
           <p className="mt-2 max-w-2xl text-muted-foreground">
-            Describe who you want. ProspectDyno finds companies, scores them, and puts the best in your inbox.
+            Describe who you want, or confirm a brief from your website. ProspectDyno finds companies, scores them, and puts the best in your inbox.
           </p>
         </div>
         <p className="text-sm text-muted-foreground">
@@ -232,6 +244,11 @@ export default async function DashboardPage({
                         {company?.name ?? "Company"}
                       </Link>
                       <p className="text-sm text-muted-foreground">{company?.domain}</p>
+                      {emailsFromCompanySources(contactsByCompany.get(row.company_id), company?.source_metadata).map((email) => (
+                        <a key={email} href={`mailto:${email}`} className="mt-1 block text-sm text-teal-800 hover:underline">
+                          {email}
+                        </a>
+                      ))}
                       <p className="mt-1 text-sm">{row.recommended_angle}</p>
                       {why[0] ? <p className="mt-1 text-sm text-muted-foreground">{why[0]}</p> : null}
                     </div>

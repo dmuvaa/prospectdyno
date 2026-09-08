@@ -1,6 +1,7 @@
 "use server";
 
 import { interpretIcp } from "@prospectdyno/ai";
+import { inspectSellerWebsite, websiteFromDomain } from "@prospectdyno/engine";
 import type { IcpInterpretation } from "@prospectdyno/shared";
 import { revalidatePath } from "next/cache";
 import { redirect } from "next/navigation";
@@ -8,29 +9,60 @@ import { recordAudit } from "@/lib/audit";
 import { consumeCredits } from "@/lib/metering";
 import { requireWorkspace } from "@/lib/workspace";
 
-export async function interpretAndCreateIcp(prompt: string) {
-  const trimmed = prompt.trim();
-  if (trimmed.length < 8) {
-    return { error: "Describe who you are looking for in a bit more detail." };
+function normalizeWebsite(value: string) {
+  const trimmed = value.trim();
+  if (!trimmed) return "";
+  try {
+    const url = new URL(trimmed.includes("://") ? trimmed : `https://${trimmed}`);
+    if (!["http:", "https:"].includes(url.protocol)) return "";
+    return url.toString();
+  } catch {
+    return websiteFromDomain(trimmed) ?? "";
+  }
+}
+
+export async function interpretAndCreateIcp(input: { website: string; notes?: string }) {
+  const website = normalizeWebsite(input.website);
+  const notes = (input.notes ?? "").trim();
+
+  if (!website) {
+    return { error: "Enter your company website first. We read it and draft the brief." };
   }
 
   const { supabase, user, workspace } = await requireWorkspace();
 
+  let site;
+  try {
+    site = await inspectSellerWebsite(website);
+  } catch (error) {
+    return { error: error instanceof Error ? error.message : "Could not read that website." };
+  }
+
+  if (site.wordCount < 20 && !site.title && !site.description) {
+    return { error: "That website did not return enough content to draft a brief. Check the URL and try again." };
+  }
+
   let result;
   try {
-    result = await interpretIcp(trimmed);
+    result = await interpretIcp(notes, site);
   } catch (error) {
     const message =
       error instanceof Error ? error.message : "Could not interpret this ICP.";
     return { error: message };
   }
 
+  const originalPrompt = [
+    `Website: ${site.url}`,
+    site.title ? `Title: ${site.title}` : "",
+    notes ? `Notes: ${notes}` : "",
+  ].filter(Boolean).join("\n");
+
   const { data: icp, error } = await supabase
     .from("icps")
     .insert({
       workspace_id: workspace.id,
       name: result.data.name || "Untitled ICP",
-      original_prompt: trimmed,
+      original_prompt: originalPrompt,
       interpretation: result.data,
       criteria: result.data,
       custom_criteria: result.data.custom_criteria,
@@ -58,6 +90,7 @@ export async function interpretAndCreateIcp(prompt: string) {
       completion_tokens: result.usage.completionTokens,
       duration_ms: result.durationMs,
       icp_id: icp.id,
+      website: site.url,
     },
     idempotencyKey: `interpret_icp:${icp.id}`,
   });
@@ -68,6 +101,7 @@ export async function interpretAndCreateIcp(prompt: string) {
     action: "icp.created",
     entityType: "icp",
     entityId: icp.id,
+    metadata: { website: site.url },
   });
 
   redirect(`/icps/${icp.id}`);

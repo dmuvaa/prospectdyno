@@ -1,5 +1,5 @@
 import { describe, expect, it } from "vitest";
-import { extractEmails, isThinWebsiteAnalysis, relatedPageUrls } from "./crawl";
+import { extractEmails, isThinWebsiteAnalysis, relatedPageUrls, sellerSiteUrls } from "./crawl";
 
 describe("extractEmails", () => {
   it("prefers same-domain addresses and drops junk", () => {
@@ -38,5 +38,17 @@ describe("relatedPageUrls", () => {
       "http://www.msetotravel.com/contact-us",
       "http://www.msetotravel.com/about",
     ]);
+  });
+});
+
+describe("sellerSiteUrls", () => {
+  it("covers about, services, and contact paths", () => {
+    const urls = sellerSiteUrls("https://agency.example/");
+    expect(urls[0]).toBe("https://agency.example/");
+    expect(urls).toEqual(expect.arrayContaining([
+      "https://agency.example/about",
+      "https://agency.example/services",
+      "https://agency.example/contact",
+    ]));
   });
 });

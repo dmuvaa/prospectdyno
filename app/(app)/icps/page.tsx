@@ -18,7 +18,7 @@ export default async function IcpsPage() {
     <div className="space-y-6">
       <PageHeader
         title="Saved briefs"
-        description="Hunts save a brief automatically. Edit criteria here when you want a tighter definition."
+        description="Start from your website. Confirm the companies you want to find, then hunt from Run."
         action={
           <div className="flex flex-wrap gap-2">
             <Button asChild variant="ink">
@@ -56,7 +56,7 @@ export default async function IcpsPage() {
       ) : (
         <EmptyState
           title="No briefs yet"
-          description="Describe who you sell to on the Run page. ProspectDyno saves the interpreted brief with the hunt."
+          description="Start from your website on Briefs, or describe a hunt here. ProspectDyno saves the interpreted brief with the hunt."
           href="/dashboard"
           cta="Find companies"
         />

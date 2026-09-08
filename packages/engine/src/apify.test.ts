@@ -22,7 +22,7 @@ describe("buildGoogleMapsInput", () => {
       locationQuery: "Nairobi, Kenya",
       maxCrawledPlacesPerSearch: 5,
       skipClosedPlaces: true,
-      scrapeContacts: false,
+      scrapeContacts: true,
       searchMatching: "all",
       includeWebResults: false,
     });

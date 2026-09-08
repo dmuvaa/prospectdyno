@@ -143,11 +143,35 @@ Rules:
 - Prefer ISO-style country names (United States, United Kingdom) over abbreviations unless the user used a well-known code that maps clearly.
 - Signals are observable business events: hiring, expansion, new website, technology adoption, product launch, content activity.`;
 
+const FROM_WEBSITE_SYSTEM_PROMPT = `You infer a B2B ideal customer profile from a company's own website for ProspectDyno.
+
+The website belongs to the seller, not the prospect. Describe the companies they should hunt as customers, not a profile of the seller.
+
+Rules:
+- Industries, countries, cities, services, and customer types are about TARGET companies they sell to.
+- Use the site's services, markets, case studies, and positioning as evidence.
+- Put qualitative buying signals into custom_criteria.
+- If the user added notes, those notes override inferences from the site.
+- name should be a short saved-search title, 3-7 words.
+- summary should be one or two sentences: who they should find, and why.
+- Use empty arrays and nulls when unknown. Do not invent a geography the site does not support.
+- Prefer ISO-style country names.
+- Signals are observable events on target companies: hiring, expansion, outdated website, new locations, technology adoption.`;
+
 export async function interpretIcp(
   prompt: string,
+  site?: {
+    url: string;
+    title: string | null;
+    description: string | null;
+    technologies: string[];
+    emails: string[];
+    excerpt: string;
+    wordCount: number;
+  } | null,
 ): Promise<AiCompletionResult<IcpInterpretation>> {
   const trimmed = prompt.trim();
-  if (trimmed.length < 8) {
+  if (!site && trimmed.length < 8) {
     throw new AiError("Describe the customer in a bit more detail.");
   }
 
@@ -156,8 +180,19 @@ export async function interpretIcp(
     schemaName: "icp_interpretation",
     schema: interpretationJsonSchema as unknown as Record<string, unknown>,
     parser: icpInterpretationSchema,
-    system: SYSTEM_PROMPT,
-    user: trimmed,
+    system: site ? FROM_WEBSITE_SYSTEM_PROMPT : SYSTEM_PROMPT,
+    user: site
+      ? JSON.stringify({
+          website: site.url,
+          title: site.title,
+          description: site.description,
+          technologies: site.technologies,
+          emails: site.emails,
+          word_count: site.wordCount,
+          excerpt: site.excerpt.slice(0, 6500),
+          notes: trimmed || null,
+        })
+      : trimmed,
   });
 
   return {

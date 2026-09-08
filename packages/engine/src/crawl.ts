@@ -120,6 +120,62 @@ export function relatedPageUrls(url: string) {
   }
 }
 
+export function sellerSiteUrls(url: string) {
+  try {
+    const parsed = new URL(url.includes("://") ? url : `https://${url}`);
+    return [...new Set([
+      parsed.toString(),
+      new URL("/about", parsed.origin).toString(),
+      new URL("/about-us", parsed.origin).toString(),
+      new URL("/services", parsed.origin).toString(),
+      new URL("/solutions", parsed.origin).toString(),
+      new URL("/work", parsed.origin).toString(),
+      new URL("/our-work", parsed.origin).toString(),
+      new URL("/case-studies", parsed.origin).toString(),
+      new URL("/industries", parsed.origin).toString(),
+      new URL("/who-we-serve", parsed.origin).toString(),
+      new URL("/clients", parsed.origin).toString(),
+      new URL("/pricing", parsed.origin).toString(),
+      new URL("/contact", parsed.origin).toString(),
+      new URL("/company", parsed.origin).toString(),
+    ])];
+  } catch {
+    return [url];
+  }
+}
+
+export type SellerSiteDossier = {
+  url: string;
+  title: string | null;
+  description: string | null;
+  technologies: string[];
+  emails: string[];
+  excerpt: string;
+  wordCount: number;
+};
+
+export async function inspectSellerWebsite(url: string): Promise<SellerSiteDossier> {
+  const normalized = url.includes("://") ? url : `https://${url}`;
+  const pages = sellerSiteUrls(normalized);
+  const fetched = await Promise.all(pages.map((page) => fetchWebsite(page).catch(() => null)));
+  const usable = fetched.filter((page): page is NonNullable<typeof page> => Boolean(page && page.htmlExcerpt.trim()));
+  const home = fetched[0] ?? usable[0];
+  if (!home) throw new Error(`Could not fetch ${normalized}`);
+  const excerpt = usable.map((page) => page.htmlExcerpt).join("\n\n").replace(/\s+/g, " ").trim() || home.htmlExcerpt;
+  const emails = uniqueEmails(usable.flatMap((page) => page.emails));
+  const technologies = [...new Set(usable.flatMap((page) => page.summary.technologies))];
+
+  return {
+    url: normalized,
+    title: home.summary.title,
+    description: home.summary.description,
+    technologies,
+    emails,
+    excerpt: excerpt.slice(0, 8000),
+    wordCount: excerpt.split(/\s+/).filter(Boolean).length,
+  };
+}
+
 async function fetchWebsite(url: string, signal?: AbortSignal) {
   const controller = new AbortController();
   const timer = setTimeout(() => controller.abort(), 8000);

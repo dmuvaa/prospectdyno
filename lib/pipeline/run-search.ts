@@ -4,6 +4,7 @@ import {
   crawledSiteFor,
   crawlWebsitePages,
   emailsFromUnknown,
+  mergeEmailMetadata,
   enrichApifyContacts,
   fetchApifyCandidates,
   fetchApifySerpCandidates,
@@ -324,6 +325,10 @@ export async function runSearch(
               if (!match) continue;
               row.candidate = mergeSavedCandidate(row.candidate, match);
               await saveCandidateContacts(admin, workspaceId, row.companyId, row.candidate);
+              await admin
+                .from("companies")
+                .update({ source_metadata: (row.candidate.source_metadata ?? {}) as Json })
+                .eq("id", row.companyId);
             }
             return enriched.length;
           })
@@ -681,7 +686,7 @@ function mergeSavedCandidate(target: Candidate, incoming: Candidate): Candidate 
     city: target.city || incoming.city,
     industry: target.industry || incoming.industry,
     description: target.description || incoming.description,
-    source_metadata: { ...(incoming.source_metadata ?? {}), ...(target.source_metadata ?? {}) },
+    source_metadata: mergeEmailMetadata(target.source_metadata, incoming.source_metadata),
   };
 }
 
@@ -709,7 +714,7 @@ async function upsertCompany(
   if (domain) {
     const { data: existing } = await admin
       .from("companies")
-      .select("id, website, country, city, industry, description")
+      .select("id, website, country, city, industry, description, source_metadata")
       .eq("workspace_id", workspaceId)
       .eq("normalized_domain", domain)
       .maybeSingle();
@@ -722,7 +727,10 @@ async function upsertCompany(
           city: existing.city || patch.city,
           industry: existing.industry || patch.industry,
           description: existing.description || patch.description,
-          source_metadata: patch.source_metadata,
+          source_metadata: mergeEmailMetadata(
+            existing.source_metadata as Record<string, unknown> | null,
+            candidate.source_metadata,
+          ) as Json,
         })
         .eq("id", existing.id);
       return existing.id;
