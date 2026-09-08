@@ -101,7 +101,7 @@ export default async function DashboardPage({
           <p className="text-sm font-medium text-teal-800">Run</p>
           <h1 className="font-heading mt-1 text-4xl">{workspace.name}</h1>
           <p className="mt-2 max-w-2xl text-muted-foreground">
-            Describe who you want, or confirm a brief from your website. ProspectDyno finds companies, scores them, and puts the best in your inbox.
+            Start with your website. We analyze it, prefill who you should hunt, and you confirm before the search.
           </p>
         </div>
         <p className="text-sm text-muted-foreground">
@@ -114,9 +114,9 @@ export default async function DashboardPage({
 
       <Card>
         <CardHeader>
-          <CardTitle>Start a hunt</CardTitle>
+          <CardTitle>Find companies</CardTitle>
           <CardDescription>
-            One brief in, a live search out. Review and keep the companies worth working.
+            Start with your website. We draft the brief, you confirm or edit, then we hunt.
           </CardDescription>
         </CardHeader>
         <CardContent>

@@ -2,11 +2,11 @@
 
 import { useState } from "react";
 import type { ReactNode } from "react";
-import Link from "next/link";
 import { useRouter } from "next/navigation";
 import type { IcpInterpretation, IcpStatus } from "@prospectdyno/shared";
 import { toast } from "sonner";
 import { archiveIcpAction, saveIcpAction } from "@/lib/actions/icp";
+import { startHuntAction } from "@/lib/actions/hunt";
 import { TagList } from "@/components/icp/tag-list";
 import { Breadcrumbs } from "@/components/breadcrumbs";
 import { Badge } from "@/components/ui/badge";
@@ -33,7 +33,7 @@ export function IcpEditor({
   const [name, setName] = useState(initialName);
   const [criteria, setCriteria] = useState(initialCriteria);
   const [error, setError] = useState<string | null>(null);
-  const [pending, setPending] = useState<"draft" | "approved" | "archive" | null>(null);
+  const [pending, setPending] = useState<"draft" | "approved" | "hunt" | "archive" | null>(null);
 
   function patchCompany(patch: Partial<IcpInterpretation["company"]>) {
     setCriteria((current) => ({ ...current, company: { ...current.company, ...patch } }));
@@ -58,11 +58,32 @@ export function IcpEditor({
     if (result.error) {
       setError(result.error);
       setPending(null);
-      return;
+      return false;
     }
     setPending(null);
-    toast.success(nextStatus === "approved" ? "ICP confirmed" : "Draft saved");
+    toast.success(nextStatus === "approved" ? "Brief confirmed" : "Draft saved");
     router.refresh();
+    return true;
+  }
+
+  async function confirmAndHunt() {
+    setPending("hunt");
+    setError(null);
+    const saved = await saveIcpAction(icpId, {
+      name,
+      criteria: { ...criteria, name },
+      status: "approved",
+    });
+    if (saved.error) {
+      setError(saved.error);
+      setPending(null);
+      return;
+    }
+    const result = await startHuntAction({ prompt: "", icpId });
+    if (result?.error) {
+      setError(result.error);
+      setPending(null);
+    }
   }
 
   async function archive() {
@@ -321,14 +342,12 @@ export function IcpEditor({
       {error ? <p className="text-sm text-destructive">{error}</p> : null}
 
       <div className="flex flex-wrap gap-3">
-        <Button type="button" variant="ink" disabled={pending !== null} onClick={() => void save("approved")}>
-          {pending === "approved" ? "Saving…" : "Confirm ICP"}
+        <Button type="button" variant="ink" disabled={pending !== null} onClick={() => void confirmAndHunt()}>
+          {pending === "hunt" ? "Starting hunt…" : "Confirm and find companies"}
         </Button>
-        {status === "approved" ? (
-          <Button asChild variant="outline">
-            <Link href={`/dashboard?icpId=${icpId}`}>Start a hunt</Link>
-          </Button>
-        ) : null}
+        <Button type="button" variant="outline" disabled={pending !== null} onClick={() => void save("approved")}>
+          {pending === "approved" ? "Saving…" : "Confirm brief"}
+        </Button>
         <Button type="button" variant="outline" disabled={pending !== null} onClick={() => void save("pending_review")}>
           {pending === "draft" ? "Saving…" : "Save draft"}
         </Button>

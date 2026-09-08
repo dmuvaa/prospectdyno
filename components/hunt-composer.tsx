@@ -3,10 +3,9 @@
 import { useState } from "react";
 import { creditsForHunt } from "@prospectdyno/shared";
 import { startHuntAction } from "@/lib/actions/hunt";
-import { EXAMPLE_PROMPTS } from "@/lib/examples";
+import { IcpPromptForm } from "@/components/icp/prompt-form";
 import { Button } from "@/components/ui/button";
 import { Label } from "@/components/ui/label";
-import { Textarea } from "@/components/ui/textarea";
 
 type IcpOption = { id: string; name: string; status: string };
 
@@ -21,53 +20,61 @@ export function HuntComposer({
   defaultIcpId?: string;
   creditBalance?: number;
 }) {
-  const [prompt, setPrompt] = useState(defaultPrompt);
-  const [urls, setUrls] = useState("");
+  const looksLikeSite = Boolean(defaultPrompt && /(\.|https?:\/\/)/i.test(defaultPrompt));
+  const confirmed = icps.filter((icp) => icp.status === "approved");
   const [icpId, setIcpId] = useState(defaultIcpId);
   const [error, setError] = useState<string | null>(null);
   const [pending, setPending] = useState(false);
 
-  async function onSubmit(event: React.FormEvent) {
+  async function onHunt(event: React.FormEvent) {
     event.preventDefault();
+    if (!icpId) return;
     setPending(true);
     setError(null);
     const result = await startHuntAction({
-      prompt,
-      urls: urls.trim() || undefined,
-      icpId: icpId || undefined,
+      prompt: "",
+      icpId,
     });
     if (result?.error) {
       setError(result.error);
-      if ("icpId" in result && result.icpId) setIcpId(result.icpId);
       setPending(false);
     }
   }
 
   return (
-    <form onSubmit={(event) => void onSubmit(event)} className="space-y-4">
-      <div className="space-y-2">
-        <Label htmlFor="hunt-prompt">Who should we find?</Label>
-        <Textarea
-          id="hunt-prompt"
-          value={prompt}
-          onChange={(event) => setPrompt(event.target.value)}
-          placeholder="UK digital marketing agencies with 5–50 people that sell local SEO…"
-          className="min-h-[120px] text-base"
-          required={!icpId}
+    <div className="space-y-6">
+      {icpId ? (
+        <form onSubmit={(event) => void onHunt(event)} className="space-y-4">
+          <p className="text-sm text-muted-foreground">
+            Hunting with the confirmed brief. Change the brief below, or clear it to start from a website.
+          </p>
+          {error ? <p className="text-sm text-destructive">{error}</p> : null}
+          <p className="text-sm text-muted-foreground">
+            A hunt of 25 companies uses about {creditsForHunt(25)} credits
+            {creditBalance != null ? ` · ${creditBalance} remaining` : ""}.
+          </p>
+          <Button type="submit" variant="ink" size="lg" disabled={pending}>
+            {pending ? "Starting hunt…" : "Find companies"}
+          </Button>
+        </form>
+      ) : (
+        <IcpPromptForm
+          defaultWebsite={looksLikeSite ? defaultPrompt : ""}
+          defaultNotes={looksLikeSite ? "" : defaultPrompt}
         />
-      </div>
+      )}
 
-      {icps.length > 0 ? (
+      {confirmed.length > 0 ? (
         <div className="space-y-2">
-          <Label htmlFor="hunt-icp">Or use a saved brief</Label>
+          <Label htmlFor="hunt-icp">Or use a confirmed brief</Label>
           <select
             id="hunt-icp"
             className="h-9 w-full rounded-md border border-input bg-background px-2 text-sm"
             value={icpId}
             onChange={(event) => setIcpId(event.target.value)}
           >
-            <option value="">New brief from the description above</option>
-            {icps.map((icp) => (
+            <option value="">Start from a website</option>
+            {confirmed.map((icp) => (
               <option key={icp.id} value={icp.id}>
                 {icp.name}
               </option>
@@ -75,45 +82,6 @@ export function HuntComposer({
           </select>
         </div>
       ) : null}
-
-      <div className="space-y-2">
-        <Label htmlFor="hunt-urls">Websites or domains (optional)</Label>
-        <Textarea
-          id="hunt-urls"
-          value={urls}
-          onChange={(event) => setUrls(event.target.value)}
-          placeholder={"example.com\nhttps://another-agency.co.uk"}
-          className="min-h-[88px]"
-        />
-        <p className="text-xs text-muted-foreground">
-          Paste a list to hunt those companies now. Leave empty to discover from the brief when Apify is configured.
-        </p>
-      </div>
-
-      <div className="flex flex-wrap gap-2">
-        {EXAMPLE_PROMPTS.map((example) => (
-          <button
-            key={example}
-            type="button"
-            className="max-w-full rounded-full border border-border bg-background px-3 py-1 text-left text-xs text-muted-foreground hover:border-teal-700/40 hover:text-foreground"
-            onClick={() => setPrompt(example)}
-          >
-            {example.length > 72 ? `${example.slice(0, 72)}…` : example}
-          </button>
-        ))}
-      </div>
-
-      {error ? <p className="text-sm text-destructive">{error}</p> : null}
-
-      <p className="text-sm text-muted-foreground">
-        A hunt of 25 companies uses about {creditsForHunt(25)} credits
-        {creditBalance != null ? ` · ${creditBalance} remaining` : ""}.
-        Running out no longer stops the hunt.
-      </p>
-
-      <Button type="submit" variant="ink" size="lg" disabled={pending}>
-        {pending ? "Starting hunt…" : "Find companies"}
-      </Button>
-    </form>
+    </div>
   );
 }

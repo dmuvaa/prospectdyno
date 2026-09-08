@@ -23,7 +23,7 @@ export default async function NewSearchPage({
         crumbs={[{ href: "/searches", label: "History" }, { label: "Advanced" }]}
         kicker="Advanced"
         title="CSV, Apify, or a named import"
-        description="Use this when you already have a file or want a custom discovery plan. For a normal hunt, describe who you want on Run."
+        description="Use this when you already have a file or want a custom discovery plan. For a normal hunt, start from your website on Run."
       />
       <p className="text-sm">
         <Link href="/dashboard" className="text-teal-800 hover:underline">
